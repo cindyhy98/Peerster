@@ -13,8 +13,6 @@ import (
 
 const bufSize = 65000
 
-var counter uint32 // initialized by default to 0
-
 // NewUDP returns a new udp transport implementation.
 func NewUDP() transport.Transport {
 	return &UDP{
@@ -114,9 +112,13 @@ func (s *Socket) Send(dest string, pkt transport.Packet, timeout time.Duration) 
 	if timeout == 0 {
 		timeout = math.MaxInt64
 	}
-	connSend.SetWriteDeadline(time.Now().Add(timeout))
-	_, errWrite := connSend.Write(buf)
 
+	errSetDead := connSend.SetWriteDeadline(time.Now().Add(timeout))
+	if errSetDead != nil {
+		return errSetDead
+	}
+
+	_, errWrite := connSend.Write(buf)
 	if errWrite != nil {
 		log.Error().Msgf("[Write error] %v", errWrite)
 		return checkTimeoutError(errWrite, timeout)
@@ -141,7 +143,11 @@ func (s *Socket) Recv(timeout time.Duration) (transport.Packet, error) {
 		timeout = math.MaxInt64
 	}
 
-	s.conn.SetReadDeadline(time.Now().Add(timeout))
+	errSetDead := s.conn.SetReadDeadline(time.Now().Add(timeout))
+	if errSetDead != nil {
+		return transport.Packet{}, errSetDead
+	}
+
 	n, _, errRead := s.conn.ReadFromUDP(buffer)
 
 	if errRead != nil {
@@ -192,9 +198,11 @@ func checkTimeoutError(err error, timeout time.Duration) error {
 	var netError net.Error
 	if errors.As(err, &netError) && netError.Timeout() {
 		return transport.TimeoutError(timeout)
-	} else {
-		return err
 	}
+
+	// else
+	return err
+
 }
 
 func (p *packets) add(pkt transport.Packet) {

@@ -21,7 +21,6 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	var newRoutable safeRoutable
 	newRoutable.realTable = make(map[string]string)
 	newRoutable.UpdateRoutingtable(nodeAddr, nodeAddr)
-	log.Info().Msgf("%v", newRoutable)
 	newNode := node{conf: conf, stopChannel: make(chan bool), routable: newRoutable}
 
 	// Register the handler
@@ -85,11 +84,8 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 	if pktDest == socketAddr {
 		// the received packet is for this node
 		// -> the registry must be used to execute the callback associated with the message contained in the packet
-		//log.Info().Msgf("Exec the callback")
-
 		errProc := n.conf.MessageRegistry.ProcessPacket(pkt)
 		if errProc != nil {
-			//log.Error().Msgf("[CompareHeader] %v", errProc)
 			return errProc
 		}
 		return nil
@@ -104,7 +100,6 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 		}
 
 		err := n.conf.Socket.Send(nextHop, pkt, 0)
-		//log.Info().Msgf("[CompareHeader] After sending")
 
 		return checkTimeoutError(err, 0)
 	}
@@ -115,9 +110,11 @@ func checkTimeoutError(err error, timeout time.Duration) error {
 	var netError net.Error
 	if errors.As(err, &netError) && netError.Timeout() {
 		return transport.TimeoutError(timeout)
-	} else {
-		return err
 	}
+
+	// else
+	return err
+
 }
 
 // Start implements peer.Service
@@ -136,7 +133,7 @@ func (n *node) Start() error {
 				pkt, err := n.conf.Socket.Recv(1000)
 
 				if err != nil {
-					if checkTimeoutError(err, time.Duration(1000)) == transport.TimeoutError(1000) {
+					if errors.Is(checkTimeoutError(err, time.Duration(1000)), transport.TimeoutError(1000)) {
 						continue
 					}
 				}
