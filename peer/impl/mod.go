@@ -114,7 +114,6 @@ func checkTimeoutError(err error, timeout time.Duration) error {
 		return transport.TimeoutError(timeout)
 	}
 
-	// else
 	return err
 
 }
@@ -128,10 +127,8 @@ func (n *node) Start() error {
 		for {
 			select {
 			case <-n.stopChannel:
-				//log.Info().Msgf("[LOG] Should end")
-			default:
-				//log.Info().Msgf("[LOG] Start")
 
+			default:
 				pkt, err := n.conf.Socket.Recv(1000)
 
 				if err != nil {
@@ -203,7 +200,7 @@ func (n *node) AddPeer(addr ...string) {
 			n.routable.UpdateRoutingtable(peerAddr, peerAddr)
 		} else {
 			log.Info().Msgf("[LOG] Add Ourselves -> Do nothing")
-			return
+			//return
 		}
 	}
 
