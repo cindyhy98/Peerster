@@ -19,8 +19,10 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	// Therefore, you are free to rename and change it as you want.
 	var nodeAddr = conf.Socket.GetAddress()
 	var newRoutable safeRoutable
+	newRoutable.Mutex = &sync.Mutex{}
 	newRoutable.realTable = make(map[string]string)
 	newRoutable.UpdateRoutingtable(nodeAddr, nodeAddr)
+
 	newNode := node{conf: conf, stopChannel: make(chan bool), routable: newRoutable}
 
 	// Register the handler
@@ -51,7 +53,7 @@ func (t *safeRoutable) FindRoutingEntry(key string) (string, bool) {
 }
 
 type safeRoutable struct {
-	sync.Mutex
+	*sync.Mutex
 	realTable peer.RoutingTable
 }
 
@@ -89,20 +91,20 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 			return errProc
 		}
 		return nil
-	} else {
-		// the packet is to be relayed
-		// -> update the RelayedBy field of the packet’s header to the peer’s socket address.
-		pkt.Header.RelayedBy = socketAddr
-
-		nextHop, ok := n.routable.FindRoutingEntry(pktDest)
-		if !ok {
-			return errors.New("couldn't find the peer")
-		}
-
-		err := n.conf.Socket.Send(nextHop, pkt, 0)
-
-		return checkTimeoutError(err, 0)
 	}
+	// else
+	// the packet is to be relayed
+	// -> update the RelayedBy field of the packet’s header to the peer’s socket address.
+	pkt.Header.RelayedBy = socketAddr
+
+	nextHop, ok := n.routable.FindRoutingEntry(pktDest)
+	if !ok {
+		return errors.New("couldn't find the peer")
+	}
+
+	err := n.conf.Socket.Send(nextHop, pkt, 0)
+
+	return checkTimeoutError(err, 0)
 
 }
 
