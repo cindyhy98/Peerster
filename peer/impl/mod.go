@@ -109,7 +109,6 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 		return checkTimeoutError(err, 0)
 	}
 
-	return nil
 }
 
 func checkTimeoutError(err error, timeout time.Duration) error {
