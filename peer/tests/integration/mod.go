@@ -16,17 +16,6 @@ import (
 var studentFac peer.Factory = impl.NewPeer
 var referenceFac peer.Factory
 
-// a bag of supported OS
-var supportedOS = map[string]struct{}{
-	"darwin": {},
-	"linux":  {},
-}
-
-// a bag of supported architecture
-var supportedArch = map[string]struct{}{
-	"amd64": {},
-}
-
 func init() {
 	path := getPath()
 	referenceFac = binnode.GetBinnodeFac(path)
@@ -41,17 +30,16 @@ func getPath() string {
 		return path
 	}
 
-	_, found := supportedOS[runtime.GOOS]
-	if !found {
-		panic("unsupported OS: " + runtime.GOOS)
+	bin := fmt.Sprintf("./node.%s.%s", runtime.GOOS, runtime.GOARCH)
+
+	// check if the binary exists
+	_, err := os.Stat(bin)
+	if err != nil {
+		panic(fmt.Sprintf("unsupported OS/architecture combination: %v/%v",
+			runtime.GOOS, runtime.GOARCH))
 	}
 
-	_, found = supportedArch[runtime.GOARCH]
-	if !found {
-		panic("unsupported architecture: " + runtime.GOARCH)
-	}
-
-	return fmt.Sprintf("./node.%s.%s", runtime.GOOS, runtime.GOARCH)
+	return bin
 }
 
 var udpFac transport.Factory = udp.NewUDP
