@@ -90,8 +90,7 @@ func NewHeader(source, relay, destination string, ttl uint) Header {
 // Packet is a type of message sent over the network
 type Packet struct {
 	Header *Header
-
-	Msg *Message
+	Msg    *Message
 }
 
 // Marshal transforms a packet to something that can be sent over the network.

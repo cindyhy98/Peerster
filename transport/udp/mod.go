@@ -16,7 +16,7 @@ const bufSize = 65000
 // NewUDP returns a new udp transport implementation.
 func NewUDP() transport.Transport {
 	return &UDP{
-		incomings: transport.Packet{},
+		//incomings: transport.Packet{},
 		//traffic:   traffic.NewTraffic(),
 	}
 }
@@ -25,8 +25,8 @@ func NewUDP() transport.Transport {
 //
 // - implements transport.Transport
 type UDP struct {
-	sync.RWMutex
-	incomings transport.Packet
+	//sync.RWMutex
+	//incomings transport.Packet
 	//traffic   *traffic.Traffic
 }
 
@@ -135,8 +135,6 @@ func (s *Socket) Recv(timeout time.Duration) (transport.Packet, error) {
 	// the timeout is reached. In the case the timeout is reached, return a
 	// TimeoutErr.
 
-	//log.Info().Msgf("[Recv]")
-
 	buffer := make([]byte, bufSize)
 
 	if timeout == 0 {
@@ -151,22 +149,22 @@ func (s *Socket) Recv(timeout time.Duration) (transport.Packet, error) {
 	n, _, errRead := s.conn.ReadFromUDP(buffer)
 
 	if errRead != nil {
-		//log.Error().Msgf("[Read error]")
 		err := checkTimeoutError(errRead, timeout)
 		return transport.Packet{}, err
 	}
 
-	s.UDP.Lock()
-	defer s.UDP.Unlock()
-	errUnmar := s.UDP.incomings.Unmarshal(buffer[:n])
+	//s.UDP.Lock()
+	//defer s.UDP.Unlock()
+	packet := transport.Packet{}
+	errUnmar := packet.Unmarshal(buffer[:n])
 
 	if errUnmar != nil {
 		log.Error().Msgf("[Unmarshal error]")
 		return transport.Packet{}, errUnmar
 	}
 
-	s.ins.add(s.UDP.incomings)
-	return s.UDP.incomings.Copy(), nil
+	s.ins.add(packet)
+	return packet, nil
 }
 
 func (s *Socket) GetAddress() string {
