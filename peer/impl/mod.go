@@ -6,7 +6,6 @@ import (
 	"go.dedis.ch/cs438/peer"
 	"go.dedis.ch/cs438/transport"
 	"go.dedis.ch/cs438/types"
-	"golang.org/x/xerrors"
 	"net"
 	"sync"
 	"time"
@@ -18,43 +17,25 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	// here you must return a struct that implements the peer.Peer functions.
 	// Therefore, you are free to rename and change it as you want.
 	var nodeAddr = conf.Socket.GetAddress()
+
 	var newRoutable safeRoutable
 	newRoutable.Mutex = &sync.Mutex{}
 	newRoutable.realTable = make(map[string]string)
 	newRoutable.UpdateRoutingtable(nodeAddr, nodeAddr)
 
-	newNode := node{conf: conf, stopChannel: make(chan bool), routable: newRoutable}
+	var newStatus safeStatus
+	newStatus.Mutex = &sync.Mutex{}
+	newStatus.realLastStatus = make(map[string]uint)
+	newStatus.UpdateStatus(nodeAddr, 0)
+
+	newNode := node{conf: conf, stopChannel: make(chan bool), routable: newRoutable, lastStatus: newStatus}
 
 	// Register the handler
-	conf.MessageRegistry.RegisterMessageCallback(types.ChatMessage{}, ExecChatMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.ChatMessage{}, newNode.ExecChatMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.RumorsMessage{}, newNode.ExecRumorsMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.AckMessage{}, newNode.ExecAckMessage)
 
 	return &newNode
-}
-
-func (t *safeRoutable) UpdateRoutingtable(key string, val string) {
-	t.Lock()
-	defer t.Unlock()
-
-	t.realTable[key] = val
-}
-
-func (t *safeRoutable) DeleteRoutingEntry(key string) {
-	t.Lock()
-	defer t.Unlock()
-
-	delete(t.realTable, key)
-}
-
-func (t *safeRoutable) FindRoutingEntry(key string) (string, bool) {
-	t.Lock()
-	defer t.Unlock()
-	val, ok := t.realTable[key]
-	return val, ok
-}
-
-type safeRoutable struct {
-	*sync.Mutex
-	realTable peer.RoutingTable
 }
 
 // node implements a peer to build a Peerster system
@@ -66,18 +47,8 @@ type node struct {
 	conf        peer.Configuration
 	routable    safeRoutable
 	stopChannel chan bool
-}
 
-func ExecChatMessage(msg types.Message, pkt transport.Packet) error {
-	// cast the message to its actual type. You assume it is the right type.
-	_, ok := msg.(*types.ChatMessage)
-	if !ok {
-		return xerrors.Errorf("wrong type: %T", msg)
-	}
-	// When the peer receives a ChatMessage, the peer should log that message.
-	log.Info().Msgf("received message = %v", msg)
-
-	return nil
+	lastStatus safeStatus
 }
 
 func (n *node) CompareHeader(pkt transport.Packet) error {
@@ -86,8 +57,11 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 	if pktDest == socketAddr {
 		// the received packet is for this node
 		// -> the registry must be used to execute the callback associated with the message contained in the packet
+		log.Info().Msgf("[CompareHeader] pktDest == socketDest")
 		errProc := n.conf.MessageRegistry.ProcessPacket(pkt)
+
 		if errProc != nil {
+			log.Error().Msgf("[CompareHeader] errProc = %v", errProc)
 			return errProc
 		}
 		return nil
@@ -99,7 +73,8 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 
 	nextHop, ok := n.routable.FindRoutingEntry(pktDest)
 	if !ok {
-		return errors.New("couldn't find the peer")
+		log.Error().Msgf("[CompareHeader] couldn't find the peer of [%v]", pktDest)
+		return errors.New("couldn't find the peer ")
 	}
 
 	err := n.conf.Socket.Send(nextHop, pkt, 0)
@@ -195,12 +170,11 @@ func (n *node) AddPeer(addr ...string) {
 	socketAddr := n.conf.Socket.GetAddress()
 	for _, peerAddr := range addr {
 		// lock defer unlock
-		//log.Info().Msgf("[LOG] peerAddr = %v", peerAddr)
+		log.Info().Msgf("[LOG] peerAddr = %v", peerAddr)
 		if peerAddr != socketAddr {
 			n.routable.UpdateRoutingtable(peerAddr, peerAddr)
 		} else {
-			log.Info().Msgf("[LOG] Add Ourselves -> Do nothing")
-			//return
+			log.Info().Msgf("[AddPeer] Add Ourselves -> Do nothing")
 		}
 	}
 
@@ -222,9 +196,6 @@ func (n *node) SetRoutingEntry(origin, relayAddr string) {
 	// relayAddr is empty then the record must be deleted (and the peer has
 	// potentially lost a neighbor).
 
-	//socketAddr := n.conf.Socket.GetAddress()
-	// [Question] Not quite sure about how does the routing table should be like
-
 	if relayAddr == "" {
 		//log.Info().Msgf("[SetRoutingEntry] No relay addr")
 		n.routable.DeleteRoutingEntry(origin)
@@ -233,4 +204,40 @@ func (n *node) SetRoutingEntry(origin, relayAddr string) {
 		n.routable.UpdateRoutingtable(origin, relayAddr)
 	}
 
+}
+
+func (n *node) Broadcast(msg transport.Message) error {
+	// Broadcast sends a packet asynchronously to all know destinations.
+	// The node must not send the message to itself (to its socket),
+	// but still process it.
+
+	// 1. Create a RumorsMessage containing one Rumor (this rumor embeds the message provided in argument),
+	// and send it to a random neighbour.
+	socketAddr := n.conf.Socket.GetAddress()
+	lastSeq, _ := n.lastStatus.FindStatusEntry(socketAddr)
+	newMsgRumor := types.RumorsMessage{}
+
+	// The Initial Sequence in newPeer is 0
+	// -> Don't change lastSeq in the node; change at ExecRumorsMessage
+	rumor := types.Rumor{
+		Origin:   socketAddr,
+		Sequence: lastSeq + 1,
+		Msg:      &msg,
+	}
+	newMsgRumor.Rumors = append(newMsgRumor.Rumors, rumor)
+	header := transport.NewHeader(socketAddr, socketAddr, socketAddr, 0)
+
+	// Transform RumorMessages to Messages
+	transMsg, errMsg := n.conf.MessageRegistry.MarshalMessage(newMsgRumor)
+	if errMsg != nil {
+		return errMsg
+	}
+	pktRumor := transport.Packet{Header: &header, Msg: &transMsg}
+
+	// 2. Process the message locally.
+	// ( ProcessPacket executes the registered callback based on the pkt.Message.
+	// -> Thus, it will execute ExecRumorsMessage() -> Process with ACK)
+	errProcess := n.conf.MessageRegistry.ProcessPacket(pktRumor)
+
+	return checkTimeoutError(errProcess, 0)
 }

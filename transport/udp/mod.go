@@ -125,7 +125,7 @@ func (s *Socket) Send(dest string, pkt transport.Packet, timeout time.Duration) 
 	}
 
 	s.outs.add(pkt)
-	//log.Info().Msgf("[Send] Successful")
+
 	return nil
 
 }
@@ -153,8 +153,6 @@ func (s *Socket) Recv(timeout time.Duration) (transport.Packet, error) {
 		return transport.Packet{}, err
 	}
 
-	//s.UDP.Lock()
-	//defer s.UDP.Unlock()
 	packet := transport.Packet{}
 	errUnmar := packet.Unmarshal(buffer[:n])
 
