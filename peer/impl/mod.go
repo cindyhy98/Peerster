@@ -17,6 +17,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	// here you must return a struct that implements the peer.Peer functions.
 	// Therefore, you are free to rename and change it as you want.
 	var nodeAddr = conf.Socket.GetAddress()
+	log.Info().Msgf("[NewPeer] [%v]", nodeAddr)
 
 	var newRoutable safeRoutable
 	newRoutable.Mutex = &sync.Mutex{}
@@ -34,6 +35,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	conf.MessageRegistry.RegisterMessageCallback(types.ChatMessage{}, newNode.ExecChatMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.RumorsMessage{}, newNode.ExecRumorsMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.AckMessage{}, newNode.ExecAckMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.StatusMessage{}, newNode.ExecStatusMessage)
 
 	return &newNode
 }
@@ -57,7 +59,6 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 	if pktDest == socketAddr {
 		// the received packet is for this node
 		// -> the registry must be used to execute the callback associated with the message contained in the packet
-		log.Info().Msgf("[CompareHeader] pktDest == socketDest")
 		errProc := n.conf.MessageRegistry.ProcessPacket(pkt)
 
 		if errProc != nil {
@@ -70,6 +71,7 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 	// the packet is to be relayed
 	// -> update the RelayedBy field of the packet’s header to the peer’s socket address.
 	pkt.Header.RelayedBy = socketAddr
+	pkt.Header.TTL -= 1
 
 	nextHop, ok := n.routable.FindRoutingEntry(pktDest)
 	if !ok {
@@ -170,7 +172,6 @@ func (n *node) AddPeer(addr ...string) {
 	socketAddr := n.conf.Socket.GetAddress()
 	for _, peerAddr := range addr {
 		// lock defer unlock
-		log.Info().Msgf("[LOG] peerAddr = %v", peerAddr)
 		if peerAddr != socketAddr {
 			n.routable.UpdateRoutingtable(peerAddr, peerAddr)
 		} else {

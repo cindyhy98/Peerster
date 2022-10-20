@@ -35,7 +35,7 @@ func (t *safeRoutable) FindRoutingEntry(key string) (string, bool) {
 	return val, ok
 }
 
-func (t *safeRoutable) FindRandomNeighbor(origin string) []string {
+func (t *safeRoutable) FindNeighbor(origin string) []string {
 	// Neighbor -> in the node table, find key == value
 	// Only find one neighbor
 
