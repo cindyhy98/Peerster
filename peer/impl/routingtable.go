@@ -36,8 +36,7 @@ func (t *safeRoutable) FindRoutingEntry(key string) (string, bool) {
 }
 
 func (t *safeRoutable) FindNeighbor(origin string) []string {
-	// Neighbor -> in the node table, find key == value
-	// Only find one neighbor
+	// Neighbor -> in the node table, find key == value and don't include yourself
 
 	t.Lock()
 	defer t.Unlock()
@@ -50,12 +49,21 @@ func (t *safeRoutable) FindNeighbor(origin string) []string {
 		}
 	}
 	return neighbor
+}
 
-	//if len(neighbor) != 0 {
-	//	n := rand.Int() % (len(neighbor))
-	//	log.Info().Msgf("neighbor %v, Choosen neighbor index = %v", neighbor, n)
-	//	return neighbor[n]
-	//}
-	//return ""
+func (t *safeRoutable) FindNeighborWithoutContain(origin string, addr string) []string {
+	// Neighbor -> in the node table, find key == value
+	// Only find one neighbor
 
+	t.Lock()
+	defer t.Unlock()
+	rand.Seed(time.Now().Unix())
+	var neighbor []string
+
+	for key, val := range t.realTable {
+		if key == val && origin != key && addr != key {
+			neighbor = append(neighbor, val)
+		}
+	}
+	return neighbor
 }

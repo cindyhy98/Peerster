@@ -6,6 +6,8 @@ import (
 	"go.dedis.ch/cs438/peer"
 	"go.dedis.ch/cs438/transport"
 	"go.dedis.ch/cs438/types"
+	"math"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -27,17 +29,54 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	var newStatus safeStatus
 	newStatus.Mutex = &sync.Mutex{}
 	newStatus.realLastStatus = make(map[string]uint)
-	newStatus.UpdateStatus(nodeAddr, 0)
+	//newStatus.UpdateStatus(nodeAddr, 0)
 
-	newNode := node{conf: conf, stopChannel: make(chan bool), routable: newRoutable, lastStatus: newStatus}
+	var newSentRumor safeRumorMap
+	newSentRumor.Mutex = &sync.Mutex{}
+	newSentRumor.realRumorMap = make(map[string]types.RumorsMessage)
+
+	var newTickerAntiEn timeTicker
+	if conf.AntiEntropyInterval != 0 {
+		newTickerAntiEn.T = time.NewTicker(conf.AntiEntropyInterval)
+		newTickerAntiEn.stopTicker = make(chan bool)
+	}
+
+	var newTickerHeartBeat timeTicker
+	if conf.HeartbeatInterval != 0 {
+		newTickerHeartBeat.T = time.NewTicker(conf.HeartbeatInterval)
+		newTickerHeartBeat.stopTicker = make(chan bool)
+	}
+
+	var newAckChecker ackChecker
+	if conf.AckTimeout != 0 {
+		newAckChecker.T = time.NewTimer(conf.AckTimeout)
+		newAckChecker.packetID = ""
+	} else {
+		newAckChecker.T = time.NewTimer(math.MaxInt64)
+		newAckChecker.packetID = ""
+	}
+
+	newNode := node{conf: conf, stopChannel: make(chan bool), tickerAntiEn: newTickerAntiEn, tickerHeartBeat: newTickerHeartBeat, ackRecord: newAckChecker, routable: newRoutable, lastStatus: newStatus, sentRumor: newSentRumor}
 
 	// Register the handler
 	conf.MessageRegistry.RegisterMessageCallback(types.ChatMessage{}, newNode.ExecChatMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.RumorsMessage{}, newNode.ExecRumorsMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.AckMessage{}, newNode.ExecAckMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.StatusMessage{}, newNode.ExecStatusMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.EmptyMessage{}, newNode.ExecEmptyMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.PrivateMessage{}, newNode.ExecPrivateMessage)
 
 	return &newNode
+}
+
+type timeTicker struct {
+	T          *time.Ticker
+	stopTicker chan bool
+}
+
+type ackChecker struct {
+	T        *time.Timer
+	packetID string
 }
 
 // node implements a peer to build a Peerster system
@@ -46,11 +85,65 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 type node struct {
 	peer.Peer
 	// You probably want to keep the peer.Configuration on this struct:
-	conf        peer.Configuration
-	routable    safeRoutable
-	stopChannel chan bool
+	conf peer.Configuration
 
+	stopChannel     chan bool
+	tickerAntiEn    timeTicker
+	tickerHeartBeat timeTicker
+	ackRecord       ackChecker
+
+	routable   safeRoutable
 	lastStatus safeStatus
+	sentRumor  safeRumorMap
+}
+
+func (n *node) CheckHeartBeat() {
+	socketAddr := n.conf.Socket.GetAddress()
+	lastSeq, ok := n.lastStatus.FindStatusEntry(socketAddr)
+	if !ok {
+		lastSeq = 0
+	}
+
+	transMsgEmp, _ := n.conf.MessageRegistry.MarshalMessage(types.EmptyMessage{})
+
+	newMsgRumor := types.RumorsMessage{}
+	rumor := types.Rumor{
+		Origin:   socketAddr,
+		Sequence: lastSeq + 1,
+		Msg:      &transMsgEmp,
+	}
+
+	newMsgRumor.Rumors = append(newMsgRumor.Rumors, rumor)
+	header := transport.NewHeader(socketAddr, socketAddr, socketAddr, 0)
+
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newMsgRumor)
+	pktRumor := transport.Packet{Header: &header, Msg: &transMsg}
+	//log.Info().Msgf("[CheckHeartBeat] Call ProcessPacket")
+	_ = n.conf.MessageRegistry.ProcessPacket(pktRumor)
+}
+
+func (n *node) CheckAntiEntropy() error {
+	socketAddr := n.conf.Socket.GetAddress()
+	neighbor := n.routable.FindNeighbor(socketAddr)
+
+	// TODO: Put the node's status in the packet and "send it to Random Neighbor!!"
+
+	if len(neighbor) != 0 {
+		chosenNeighbor := neighbor[rand.Int()%(len(neighbor))]
+
+		log.Info().Msgf("[CheckAntiEntropy] [%v] => Status [%v]", socketAddr, chosenNeighbor)
+
+		header := transport.NewHeader(socketAddr, socketAddr, chosenNeighbor, 0)
+		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(n.lastStatus.realLastStatus)
+		pktStatus := transport.Packet{Header: &header, Msg: &transMsg}
+
+		// Send status to random neighbor
+		errSend := n.conf.Socket.Send(chosenNeighbor, pktStatus, 0)
+		return checkTimeoutError(errSend, 0)
+	} else {
+		log.Error().Msgf("[CheckAntiEntropy] No neighbor (Don't need to Send)")
+		return nil
+	}
 }
 
 func (n *node) CompareHeader(pkt transport.Packet) error {
@@ -59,29 +152,27 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 	if pktDest == socketAddr {
 		// the received packet is for this node
 		// -> the registry must be used to execute the callback associated with the message contained in the packet
-		errProc := n.conf.MessageRegistry.ProcessPacket(pkt)
+		//log.Info().Msgf("[CompareHeader] Call ProcessPacket")
+		_ = n.conf.MessageRegistry.ProcessPacket(pkt)
 
-		if errProc != nil {
-			log.Error().Msgf("[CompareHeader] errProc = %v", errProc)
-			return errProc
+	} else {
+		// else
+		// the packet is to be relayed
+		// -> update the RelayedBy field of the packet’s header to the peer’s socket address.
+		pkt.Header.RelayedBy = socketAddr
+		pkt.Header.TTL -= 1
+
+		nextHop, ok := n.routable.FindRoutingEntry(pktDest)
+		if !ok {
+			log.Error().Msgf("[CompareHeader] couldn't find the peer of [%v]", pktDest)
+			return errors.New("couldn't find the peer ")
 		}
-		return nil
-	}
-	// else
-	// the packet is to be relayed
-	// -> update the RelayedBy field of the packet’s header to the peer’s socket address.
-	pkt.Header.RelayedBy = socketAddr
-	pkt.Header.TTL -= 1
 
-	nextHop, ok := n.routable.FindRoutingEntry(pktDest)
-	if !ok {
-		log.Error().Msgf("[CompareHeader] couldn't find the peer of [%v]", pktDest)
-		return errors.New("couldn't find the peer ")
+		err := n.conf.Socket.Send(nextHop, pkt, 0)
+		return checkTimeoutError(err, 0)
 	}
 
-	err := n.conf.Socket.Send(nextHop, pkt, 0)
-
-	return checkTimeoutError(err, 0)
+	return nil
 
 }
 
@@ -106,6 +197,30 @@ func (n *node) Start() error {
 			case <-n.stopChannel:
 
 			default:
+
+				if n.conf.AntiEntropyInterval != 0 {
+					select {
+					case <-n.tickerAntiEn.stopTicker:
+						//Do nothing
+					case <-n.tickerAntiEn.T.C:
+						_ = n.CheckAntiEntropy()
+					default:
+
+					}
+
+				} // else -> do nothing
+
+				if n.conf.HeartbeatInterval != 0 {
+
+					select {
+					case <-n.tickerHeartBeat.stopTicker:
+						//Do nothing
+					case <-n.tickerHeartBeat.T.C:
+						n.CheckHeartBeat()
+					default:
+					}
+				}
+
 				pkt, err := n.conf.Socket.Recv(1000)
 
 				if err != nil {
@@ -113,6 +228,7 @@ func (n *node) Start() error {
 						continue
 					}
 				}
+				log.Info().Msgf("[Recv] pkt and send to CompareHeader")
 
 				errComp := n.CompareHeader(pkt)
 				if errComp != nil {
@@ -132,7 +248,19 @@ func (n *node) Start() error {
 func (n *node) Stop() error {
 	// Stop stops the node. This function must block until all goroutines are
 	// done.
+
+	if n.conf.AntiEntropyInterval != 0 {
+		n.tickerAntiEn.T.Stop()
+		n.tickerAntiEn.stopTicker <- true
+	}
+
+	if n.conf.HeartbeatInterval != 0 {
+		n.tickerHeartBeat.T.Stop()
+		n.tickerHeartBeat.stopTicker <- true
+	}
+
 	n.stopChannel <- true
+
 	return nil
 }
 
@@ -215,29 +343,33 @@ func (n *node) Broadcast(msg transport.Message) error {
 	// 1. Create a RumorsMessage containing one Rumor (this rumor embeds the message provided in argument),
 	// and send it to a random neighbour.
 	socketAddr := n.conf.Socket.GetAddress()
-	lastSeq, _ := n.lastStatus.FindStatusEntry(socketAddr)
-	newMsgRumor := types.RumorsMessage{}
 
-	// The Initial Sequence in newPeer is 0
-	// -> Don't change lastSeq in the node; change at ExecRumorsMessage
+	//TODO: check functionality
+	lastSeq, _ := n.lastStatus.FindStatusEntry(socketAddr)
+
+	// Here n.lastStatus[socketAddr] is still non-exist
+
+	newMsgRumor := types.RumorsMessage{}
 	rumor := types.Rumor{
 		Origin:   socketAddr,
 		Sequence: lastSeq + 1,
 		Msg:      &msg,
 	}
+
+	//n.lastStatus.UpdateStatus(socketAddr, lastSeq+1)
+
 	newMsgRumor.Rumors = append(newMsgRumor.Rumors, rumor)
 	header := transport.NewHeader(socketAddr, socketAddr, socketAddr, 0)
 
 	// Transform RumorMessages to Messages
-	transMsg, errMsg := n.conf.MessageRegistry.MarshalMessage(newMsgRumor)
-	if errMsg != nil {
-		return errMsg
-	}
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newMsgRumor)
 	pktRumor := transport.Packet{Header: &header, Msg: &transMsg}
+	//log.Info().Msgf("[Broadcast] Call ProcessPacket")
 
-	// 2. Process the message locally.
-	// ( ProcessPacket executes the registered callback based on the pkt.Message.
-	// -> Thus, it will execute ExecRumorsMessage() -> Process with ACK)
+	// Should I add this?
+	n.sentRumor.UpdateRumorMap(socketAddr, newMsgRumor)
+	log.Info().Msgf("[BroadcastUpdateRumorMap] node(%v), SentRumor = %v", socketAddr, n.sentRumor)
+
 	errProcess := n.conf.MessageRegistry.ProcessPacket(pktRumor)
 
 	return checkTimeoutError(errProcess, 0)
