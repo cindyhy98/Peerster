@@ -1,7 +1,6 @@
 package impl
 
 import (
-	"github.com/rs/zerolog/log"
 	"go.dedis.ch/cs438/types"
 	"sync"
 )
@@ -31,25 +30,16 @@ func (s *safeStatus) GetandIncrementStatusIfEqual(key string, seq uint) (uint, b
 	s.Lock()
 	defer s.Unlock()
 
-	//if tomyself {
-	//	return 0, true
-	//}
-
 	val, ok := s.realLastStatus[key]
 
 	switch {
 	case val == seq-1 && ok:
 		// expected rumor
-		log.Info().Msgf("[EditStatus] Expected Rumor")
+		//log.Info().Msgf("[EditStatus] Expected Rumor")
 		s.realLastStatus[key] = seq
 		return seq, true
-	//case val == 0 && ok:
-	//	// add yourself -> do nothing
-	//
-	//	return 0, true
-	case !ok:
+	case seq == 1 && !ok:
 		// first rumor (should be in the expected rumor case)
-		log.Info().Msgf("[EditStatus] First Rumor from [%v]", key)
 		s.realLastStatus[key] = 1
 		return 1, true
 	case val != seq-1 && ok:
@@ -59,6 +49,17 @@ func (s *safeStatus) GetandIncrementStatusIfEqual(key string, seq uint) (uint, b
 		return 0, false
 	}
 
+}
+
+func (s *safeStatus) Freeze() types.StatusMessage {
+	copyOfMap := types.StatusMessage{}
+
+	s.Lock()
+	defer s.Unlock()
+	for k, v := range s.realLastStatus {
+		copyOfMap[k] = v
+	}
+	return copyOfMap
 }
 
 /*

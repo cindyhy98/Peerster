@@ -6,7 +6,6 @@ import (
 	"go.dedis.ch/cs438/peer"
 	"go.dedis.ch/cs438/transport"
 	"go.dedis.ch/cs438/types"
-	"math"
 	"math/rand"
 	"net"
 	"sync"
@@ -33,7 +32,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 
 	var newSentRumor safeRumorMap
 	newSentRumor.Mutex = &sync.Mutex{}
-	newSentRumor.realRumorMap = make(map[string]types.RumorsMessage)
+	newSentRumor.realRumorMap = make(map[string][]types.Rumor)
 
 	var newTickerAntiEn timeTicker
 	if conf.AntiEntropyInterval != 0 {
@@ -48,15 +47,18 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	}
 
 	var newAckChecker ackChecker
-	if conf.AckTimeout != 0 {
-		newAckChecker.T = time.NewTimer(conf.AckTimeout)
-		newAckChecker.packetID = ""
-	} else {
-		newAckChecker.T = time.NewTimer(math.MaxInt64)
-		newAckChecker.packetID = ""
-	}
+	newAckChecker.Mutex = &sync.Mutex{}
+	newAckChecker.realAckChecker = make(map[string]*time.Timer)
 
-	newNode := node{conf: conf, stopChannel: make(chan bool), tickerAntiEn: newTickerAntiEn, tickerHeartBeat: newTickerHeartBeat, ackRecord: newAckChecker, routable: newRoutable, lastStatus: newStatus, sentRumor: newSentRumor}
+	newNode := node{
+		conf:            conf,
+		stopChannel:     make(chan bool),
+		tickerAntiEn:    newTickerAntiEn,
+		tickerHeartBeat: newTickerHeartBeat,
+		ackRecord:       newAckChecker,
+		routable:        newRoutable,
+		lastStatus:      newStatus,
+		sentRumor:       newSentRumor}
 
 	// Register the handler
 	conf.MessageRegistry.RegisterMessageCallback(types.ChatMessage{}, newNode.ExecChatMessage)
@@ -72,11 +74,6 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 type timeTicker struct {
 	T          *time.Ticker
 	stopTicker chan bool
-}
-
-type ackChecker struct {
-	T        *time.Timer
-	packetID string
 }
 
 // node implements a peer to build a Peerster system
@@ -126,7 +123,7 @@ func (n *node) CheckAntiEntropy() error {
 	socketAddr := n.conf.Socket.GetAddress()
 	neighbor := n.routable.FindNeighbor(socketAddr)
 
-	// TODO: Put the node's status in the packet and "send it to Random Neighbor!!"
+	// Put the node's status in the packet and "send it to Random Neighbor!!"
 
 	if len(neighbor) != 0 {
 		chosenNeighbor := neighbor[rand.Int()%(len(neighbor))]
@@ -134,16 +131,18 @@ func (n *node) CheckAntiEntropy() error {
 		log.Info().Msgf("[CheckAntiEntropy] [%v] => Status [%v]", socketAddr, chosenNeighbor)
 
 		header := transport.NewHeader(socketAddr, socketAddr, chosenNeighbor, 0)
-		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(n.lastStatus.realLastStatus)
+		copyOfLastStatus := n.lastStatus.Freeze()
+		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(copyOfLastStatus)
 		pktStatus := transport.Packet{Header: &header, Msg: &transMsg}
 
 		// Send status to random neighbor
 		errSend := n.conf.Socket.Send(chosenNeighbor, pktStatus, 0)
 		return checkTimeoutError(errSend, 0)
-	} else {
-		log.Error().Msgf("[CheckAntiEntropy] No neighbor (Don't need to Send)")
-		return nil
 	}
+
+	log.Error().Msgf("[CheckAntiEntropy] No neighbor (Don't need to Send)")
+	return nil
+
 }
 
 func (n *node) CompareHeader(pkt transport.Packet) error {
@@ -160,12 +159,12 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 		// the packet is to be relayed
 		// -> update the RelayedBy field of the packet’s header to the peer’s socket address.
 		pkt.Header.RelayedBy = socketAddr
-		pkt.Header.TTL -= 1
+		pkt.Header.TTL--
 
 		nextHop, ok := n.routable.FindRoutingEntry(pktDest)
 		if !ok {
-			log.Error().Msgf("[CompareHeader] couldn't find the peer of [%v]", pktDest)
-			return errors.New("couldn't find the peer ")
+			//log.Error().Msgf("[CompareHeader] couldn't find the peer of [%v]", pktDest)
+			return errors.New("[CompareHeader] couldn't find the peer ")
 		}
 
 		err := n.conf.Socket.Send(nextHop, pkt, 0)
@@ -186,10 +185,40 @@ func checkTimeoutError(err error, timeout time.Duration) error {
 
 }
 
+func (n *node) AntiEntropyAgency() {
+	go func() {
+		if n.conf.AntiEntropyInterval != 0 {
+			for {
+				select {
+				case <-n.tickerAntiEn.stopTicker:
+					//Do nothing
+				case <-n.tickerAntiEn.T.C:
+					_ = n.CheckAntiEntropy()
+				}
+			}
+
+		} // else -> do nothing
+	}()
+}
+
 // Start implements peer.Service
 func (n *node) Start() error {
 	// Start starts the node. It should, among other things, start listening on
 	// its address using the socket.
+	n.AntiEntropyAgency()
+
+	go func() {
+		if n.conf.HeartbeatInterval != 0 {
+			for {
+				select {
+				case <-n.tickerHeartBeat.stopTicker:
+					//Do nothing
+				case <-n.tickerHeartBeat.T.C:
+					n.CheckHeartBeat()
+				}
+			}
+		}
+	}()
 	go func() {
 
 		for {
@@ -197,29 +226,6 @@ func (n *node) Start() error {
 			case <-n.stopChannel:
 
 			default:
-
-				if n.conf.AntiEntropyInterval != 0 {
-					select {
-					case <-n.tickerAntiEn.stopTicker:
-						//Do nothing
-					case <-n.tickerAntiEn.T.C:
-						_ = n.CheckAntiEntropy()
-					default:
-
-					}
-
-				} // else -> do nothing
-
-				if n.conf.HeartbeatInterval != 0 {
-
-					select {
-					case <-n.tickerHeartBeat.stopTicker:
-						//Do nothing
-					case <-n.tickerHeartBeat.T.C:
-						n.CheckHeartBeat()
-					default:
-					}
-				}
 
 				pkt, err := n.conf.Socket.Recv(1000)
 
@@ -344,7 +350,7 @@ func (n *node) Broadcast(msg transport.Message) error {
 	// and send it to a random neighbour.
 	socketAddr := n.conf.Socket.GetAddress()
 
-	//TODO: check functionality
+	//check functionality
 	lastSeq, _ := n.lastStatus.FindStatusEntry(socketAddr)
 
 	// Here n.lastStatus[socketAddr] is still non-exist
@@ -367,8 +373,8 @@ func (n *node) Broadcast(msg transport.Message) error {
 	//log.Info().Msgf("[Broadcast] Call ProcessPacket")
 
 	// Should I add this?
-	n.sentRumor.UpdateRumorMap(socketAddr, newMsgRumor)
-	log.Info().Msgf("[BroadcastUpdateRumorMap] node(%v), SentRumor = %v", socketAddr, n.sentRumor)
+	//n.sentRumor.UpdateRumorMap(socketAddr, newMsgRumor)
+	//log.Info().Msgf("[BroadcastUpdateRumorMap] node(%v), SentRumor = %v", socketAddr, n.sentRumor)
 
 	errProcess := n.conf.MessageRegistry.ProcessPacket(pktRumor)
 
