@@ -61,7 +61,6 @@ func (n *node) SendStatusToRandom(pkt transport.Packet) error {
 		return checkTimeoutError(errSend, 0)
 	}
 
-	log.Error().Msgf("[SendStatusToRandom] [%v] has No neighbor (Don't need to Send)", socketAddr)
 	return nil
 
 }
@@ -72,12 +71,6 @@ func (n *node) SendRumorToRandom(pkt transport.Packet, chosenNeighbor string, ms
 	if errMsg != nil {
 		return errMsg
 	}
-
-	//pkt.Header.Source = socketAddr  // Should I change this?
-	//pkt.Header.RelayedBy = socketAddr // Should I change this?
-	//pkt.Header.Destination = chosenNeighbor
-	//pkt.Header.TTL -= 1
-
 	header := transport.NewHeader(socketAddr, socketAddr, chosenNeighbor, 0)
 
 	//pktRumor := transport.Packet{Header: pkt.Header, Msg: &transMsg}
@@ -90,6 +83,7 @@ func (n *node) SendRumorToRandom(pkt transport.Packet, chosenNeighbor string, ms
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -117,6 +111,33 @@ func (n *node) SendAck(pkt transport.Packet) error {
 	errSend := n.conf.Socket.Send(newDest, pktAct, 0)
 	//_ = n.conf.MessageRegistry.ProcessPacket(pktAct)
 	return checkTimeoutError(errSend, 0)
+}
+
+func (n *node) WaitForAck(pkt transport.Packet, msgRumor *types.RumorsMessage, neighbor []string, chosenN string) {
+	if n.conf.AckTimeout != 0 {
+		timer := time.NewTimer(n.conf.AckTimeout)
+		n.ackRecord.UpdateAckChecker(pkt.Header.PacketID, timer)
+
+		go func() {
+			for {
+				<-timer.C
+				log.Error().Msgf("[WaitForAck] Timeout!!")
+
+				var chosenNeighborNew string
+				if len(neighbor) > 1 {
+					for {
+						chosenNeighborNew = neighbor[rand.Int()%(len(neighbor))]
+						if chosenNeighborNew != chosenN {
+							break
+						}
+					}
+					log.Info().Msgf("[WaitForAck] Haven Received ack after Timeout, send to another neighbor %v", chosenNeighborNew)
+					_ = n.SendRumorToRandom(pkt, chosenNeighborNew, msgRumor)
+				}
+			}
+
+		}()
+	}
 }
 
 func (n *node) ExecRumorsMessage(msg types.Message, pkt transport.Packet) error {
@@ -167,41 +188,14 @@ func (n *node) ExecRumorsMessage(msg types.Message, pkt transport.Packet) error 
 		neighbor := n.routable.FindNeighborWithoutContain(socketAddr, pkt.Header.Source)
 
 		if len(neighbor) != 0 {
-			// Cannot send to the pkt's original src!!
-			//log.Info().Msgf("[ExecRumorsMessage] all neighbors %v", neighbor)
 			chosenNeighbor := neighbor[rand.Int()%(len(neighbor))]
 
 			_ = n.SendRumorToRandom(pkt, chosenNeighbor, msgRumor)
 
-			if n.conf.AckTimeout != 0 {
-				timer := time.NewTimer(n.conf.AckTimeout)
-				n.ackRecord.UpdateAckChecker(pkt.Header.PacketID, timer)
-
-				go func() {
-					for {
-						<-timer.C
-						log.Error().Msgf("[WaitForAck] Timeout!!")
-
-						var chosenNeighborNew string
-						if len(neighbor) > 1 {
-							for {
-								chosenNeighborNew = neighbor[rand.Int()%(len(neighbor))]
-								if chosenNeighborNew != chosenNeighbor {
-									break
-								}
-							}
-							log.Info().Msgf("[WaitForAck] Haven Received ack after Timeout, send to another neighbor %v", chosenNeighborNew)
-							_ = n.SendRumorToRandom(pkt, chosenNeighborNew, msgRumor)
-						}
-					}
-
-				}()
-			}
+			n.WaitForAck(pkt, msgRumor, neighbor, chosenNeighbor)
 
 			return nil
 		}
-
-		log.Error().Msgf("[ExecRumorsMessage] [%v] has No neighbor (Don't need to Send)", socketAddr)
 	}
 	return nil
 

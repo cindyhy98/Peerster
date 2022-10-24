@@ -201,12 +201,7 @@ func (n *node) AntiEntropyAgency() {
 	}()
 }
 
-// Start implements peer.Service
-func (n *node) Start() error {
-	// Start starts the node. It should, among other things, start listening on
-	// its address using the socket.
-	n.AntiEntropyAgency()
-
+func (n *node) HeartbeatAgency() {
 	go func() {
 		if n.conf.HeartbeatInterval != 0 {
 			for {
@@ -219,6 +214,15 @@ func (n *node) Start() error {
 			}
 		}
 	}()
+}
+
+// Start implements peer.Service
+func (n *node) Start() error {
+	// Start starts the node. It should, among other things, start listening on
+	// its address using the socket.
+	n.AntiEntropyAgency()
+	n.HeartbeatAgency()
+
 	go func() {
 
 		for {
