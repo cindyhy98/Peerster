@@ -8,35 +8,35 @@ import (
 	"time"
 )
 
-/* For Routable */
+/* For Routingtable */
 
-type safeRoutable struct {
+type safeRoutingtable struct {
 	*sync.Mutex
 	realTable peer.RoutingTable
 }
 
-func (t *safeRoutable) UpdateRoutingtable(key string, val string) {
+func (t *safeRoutingtable) UpdateRoutingtable(key string, val string) {
 	t.Lock()
 	defer t.Unlock()
 
 	t.realTable[key] = val
 }
 
-func (t *safeRoutable) DeleteRoutingEntry(key string) {
+func (t *safeRoutingtable) DeleteRoutingEntry(key string) {
 	t.Lock()
 	defer t.Unlock()
 
 	delete(t.realTable, key)
 }
 
-func (t *safeRoutable) FindRoutingEntry(key string) (string, bool) {
+func (t *safeRoutingtable) FindRoutingEntry(key string) (string, bool) {
 	t.Lock()
 	defer t.Unlock()
 	val, ok := t.realTable[key]
 	return val, ok
 }
 
-func (t *safeRoutable) FindNeighbor(origin string) []string {
+func (t *safeRoutingtable) FindNeighbor(origin string) []string {
 	// Neighbor -> in the node table, find key == value and don't include yourself
 
 	t.Lock()
@@ -52,7 +52,7 @@ func (t *safeRoutable) FindNeighbor(origin string) []string {
 	return neighbor
 }
 
-func (t *safeRoutable) FindNeighborWithoutContain(origin string, addr string) []string {
+func (t *safeRoutingtable) FindNeighborWithoutContain(origin string, addr string) []string {
 	// Neighbor -> in the node table, find key == value
 	// Only find one neighbor
 

@@ -20,10 +20,10 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	var nodeAddr = conf.Socket.GetAddress()
 	log.Info().Msgf("[NewPeer] [%v]", nodeAddr)
 
-	var newRoutable safeRoutable
-	newRoutable.Mutex = &sync.Mutex{}
-	newRoutable.realTable = make(map[string]string)
-	newRoutable.UpdateRoutingtable(nodeAddr, nodeAddr)
+	var newRoutingtable safeRoutingtable
+	newRoutingtable.Mutex = &sync.Mutex{}
+	newRoutingtable.realTable = make(map[string]string)
+	newRoutingtable.UpdateRoutingtable(nodeAddr, nodeAddr)
 
 	var newStatus safeStatus
 	newStatus.Mutex = &sync.Mutex{}
@@ -56,7 +56,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 		tickerAntiEn:    newTickerAntiEn,
 		tickerHeartBeat: newTickerHeartBeat,
 		ackRecord:       newAckChecker,
-		routable:        newRoutable,
+		routingtable:    newRoutingtable,
 		lastStatus:      newStatus,
 		sentRumor:       newSentRumor}
 
@@ -89,11 +89,25 @@ type node struct {
 	tickerHeartBeat timeTicker
 	ackRecord       ackChecker
 
-	routable   safeRoutable
-	lastStatus safeStatus
-	sentRumor  safeRumorMap
+	routingtable safeRoutingtable
+	lastStatus   safeStatus
+	sentRumor    safeRumorMap
 }
 
+func (n *node) HeartbeatAgency() {
+	go func() {
+		if n.conf.HeartbeatInterval != 0 {
+			for {
+				select {
+				case <-n.tickerHeartBeat.stopTicker:
+					//Do nothing
+				case <-n.tickerHeartBeat.T.C:
+					n.CheckHeartBeat()
+				}
+			}
+		}
+	}()
+}
 func (n *node) CheckHeartBeat() {
 	socketAddr := n.conf.Socket.GetAddress()
 	lastSeq, ok := n.lastStatus.FindStatusEntry(socketAddr)
@@ -119,9 +133,24 @@ func (n *node) CheckHeartBeat() {
 	_ = n.conf.MessageRegistry.ProcessPacket(pktRumor)
 }
 
+func (n *node) AntiEntropyAgency() {
+	go func() {
+		if n.conf.AntiEntropyInterval != 0 {
+			for {
+				select {
+				case <-n.tickerAntiEn.stopTicker:
+					//Do nothing
+				case <-n.tickerAntiEn.T.C:
+					_ = n.CheckAntiEntropy()
+				}
+			}
+
+		} // else -> do nothing
+	}()
+}
 func (n *node) CheckAntiEntropy() error {
 	socketAddr := n.conf.Socket.GetAddress()
-	neighbor := n.routable.FindNeighbor(socketAddr)
+	neighbor := n.routingtable.FindNeighbor(socketAddr)
 
 	// Put the node's status in the packet and "send it to Random Neighbor!!"
 
@@ -161,7 +190,7 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 		pkt.Header.RelayedBy = socketAddr
 		pkt.Header.TTL--
 
-		nextHop, ok := n.routable.FindRoutingEntry(pktDest)
+		nextHop, ok := n.routingtable.FindRoutingEntry(pktDest)
 		if !ok {
 			//log.Error().Msgf("[CompareHeader] couldn't find the peer of [%v]", pktDest)
 			return errors.New("[CompareHeader] couldn't find the peer ")
@@ -183,37 +212,6 @@ func checkTimeoutError(err error, timeout time.Duration) error {
 
 	return err
 
-}
-
-func (n *node) AntiEntropyAgency() {
-	go func() {
-		if n.conf.AntiEntropyInterval != 0 {
-			for {
-				select {
-				case <-n.tickerAntiEn.stopTicker:
-					//Do nothing
-				case <-n.tickerAntiEn.T.C:
-					_ = n.CheckAntiEntropy()
-				}
-			}
-
-		} // else -> do nothing
-	}()
-}
-
-func (n *node) HeartbeatAgency() {
-	go func() {
-		if n.conf.HeartbeatInterval != 0 {
-			for {
-				select {
-				case <-n.tickerHeartBeat.stopTicker:
-					//Do nothing
-				case <-n.tickerHeartBeat.T.C:
-					n.CheckHeartBeat()
-				}
-			}
-		}
-	}()
 }
 
 // Start implements peer.Service
@@ -270,8 +268,50 @@ func (n *node) Stop() error {
 	}
 
 	n.stopChannel <- true
-
+	log.Info().Msgf("[Stop] 4")
 	return nil
+}
+
+// AddPeer implements peer.Service/peer.Messaging
+func (n *node) AddPeer(addr ...string) {
+	// AddPeer adds new known addresses to the node. It must update the
+	// routing table of the node. Adding ourselves should have no effect.
+	socketAddr := n.conf.Socket.GetAddress()
+	for _, peerAddr := range addr {
+		// lock defer unlock
+		if peerAddr != socketAddr {
+			n.routingtable.UpdateRoutingtable(peerAddr, peerAddr)
+		} else {
+			log.Info().Msgf("[AddPeer] Add Ourselves -> Do nothing")
+		}
+	}
+
+}
+
+// GetRoutingTable implements peer.Service/peer.Messaging
+func (n *node) GetRoutingTable() peer.RoutingTable {
+	// GetRoutingTable returns the node's routing table. It should be a copy.
+
+	return n.routingtable.realTable
+	//panic("to be implemented in HW0")
+}
+
+// SetRoutingEntry implements peer.Service/peer.Messaging
+func (n *node) SetRoutingEntry(origin, relayAddr string) {
+	// SetRoutingEntry sets the routing entry. Overwrites it if the entry
+	// already exists. If the origin is equal to the relayAddr, then the node
+	// has a new neighbor (the notion of neighboors is not needed in HW0). If
+	// relayAddr is empty then the record must be deleted (and the peer has
+	// potentially lost a neighbor).
+
+	if relayAddr == "" {
+		//log.Info().Msgf("[SetRoutingEntry] No relay addr")
+		n.routingtable.DeleteRoutingEntry(origin)
+	} else {
+		//log.Info().Msgf("[SetRoutingEntry] need relay")
+		n.routingtable.UpdateRoutingtable(origin, relayAddr)
+	}
+
 }
 
 // Unicast implements peer.Messaging
@@ -293,7 +333,7 @@ func (n *node) Unicast(dest string, msg transport.Message) error {
 		Msg:    &msg,
 	}
 
-	nextHop, ok := n.routable.FindRoutingEntry(dest)
+	nextHop, ok := n.routingtable.FindRoutingEntry(dest)
 	if !ok {
 		return errors.New("couldn't find the peer")
 	}
@@ -303,48 +343,7 @@ func (n *node) Unicast(dest string, msg transport.Message) error {
 
 }
 
-// AddPeer implements peer.Service
-func (n *node) AddPeer(addr ...string) {
-	// AddPeer adds new known addresses to the node. It must update the
-	// routing table of the node. Adding ourselves should have no effect.
-	socketAddr := n.conf.Socket.GetAddress()
-	for _, peerAddr := range addr {
-		// lock defer unlock
-		if peerAddr != socketAddr {
-			n.routable.UpdateRoutingtable(peerAddr, peerAddr)
-		} else {
-			log.Info().Msgf("[AddPeer] Add Ourselves -> Do nothing")
-		}
-	}
-
-}
-
-// GetRoutingTable implements peer.Service
-func (n *node) GetRoutingTable() peer.RoutingTable {
-	// GetRoutingTable returns the node's routing table. It should be a copy.
-
-	return n.routable.realTable
-	//panic("to be implemented in HW0")
-}
-
-// SetRoutingEntry implements peer.Service
-func (n *node) SetRoutingEntry(origin, relayAddr string) {
-	// SetRoutingEntry sets the routing entry. Overwrites it if the entry
-	// already exists. If the origin is equal to the relayAddr, then the node
-	// has a new neighbor (the notion of neighboors is not needed in HW0). If
-	// relayAddr is empty then the record must be deleted (and the peer has
-	// potentially lost a neighbor).
-
-	if relayAddr == "" {
-		//log.Info().Msgf("[SetRoutingEntry] No relay addr")
-		n.routable.DeleteRoutingEntry(origin)
-	} else {
-		//log.Info().Msgf("[SetRoutingEntry] need relay")
-		n.routable.UpdateRoutingtable(origin, relayAddr)
-	}
-
-}
-
+// Broadcast implements peer.Messaging
 func (n *node) Broadcast(msg transport.Message) error {
 	// Broadcast sends a packet asynchronously to all know destinations.
 	// The node must not send the message to itself (to its socket),
@@ -375,11 +374,6 @@ func (n *node) Broadcast(msg transport.Message) error {
 	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newMsgRumor)
 	pktRumor := transport.Packet{Header: &header, Msg: &transMsg}
 	//log.Info().Msgf("[Broadcast] Call ProcessPacket")
-
-	// Should I add this?
-	//n.sentRumor.UpdateRumorMap(socketAddr, newMsgRumor)
-	//log.Info().Msgf("[BroadcastUpdateRumorMap] node(%v), SentRumor = %v", socketAddr, n.sentRumor)
-
 	errProcess := n.conf.MessageRegistry.ProcessPacket(pktRumor)
 
 	return checkTimeoutError(errProcess, 0)

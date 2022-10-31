@@ -47,7 +47,7 @@ func (n *node) SendStatusBackToRemote(remoteAddr string) error {
 
 func (n *node) SendStatusToRandom(pkt transport.Packet) error {
 	socketAddr := n.conf.Socket.GetAddress()
-	neighbor := n.routable.FindNeighborWithoutContain(socketAddr, pkt.Header.Source)
+	neighbor := n.routingtable.FindNeighborWithoutContain(socketAddr, pkt.Header.Source)
 
 	if len(neighbor) != 0 {
 		chosenNeighbor := neighbor[rand.Int()%(len(neighbor))]
@@ -156,11 +156,11 @@ func (n *node) ExecRumorsMessage(msg types.Message, pkt transport.Packet) error 
 			//log.Info().Msgf("[ExecRumorsMessage] Expected Rumor")
 			isExpected = true
 
-			if socketAddr != rumor.Origin && !Contains(n.routable.FindNeighbor(socketAddr), rumor.Origin) {
+			if socketAddr != rumor.Origin && !Contains(n.routingtable.FindNeighbor(socketAddr), rumor.Origin) {
 				log.Info().Msgf("[ExecRumorsMessage] Add [%v]:[%v] to routing table", pkt.Header.Source, pkt.Header.RelayedBy)
 
 				// Should we check if the entry exists before updating the routing table? Or doesn't matter
-				n.routable.UpdateRoutingtable(rumor.Origin, pkt.Header.RelayedBy)
+				n.routingtable.UpdateRoutingtable(rumor.Origin, pkt.Header.RelayedBy)
 			}
 
 			n.sentRumor.UpdateRumorMap(rumor.Origin, rumor)
@@ -185,7 +185,7 @@ func (n *node) ExecRumorsMessage(msg types.Message, pkt transport.Packet) error 
 	}
 
 	if isExpected {
-		neighbor := n.routable.FindNeighborWithoutContain(socketAddr, pkt.Header.Source)
+		neighbor := n.routingtable.FindNeighborWithoutContain(socketAddr, pkt.Header.Source)
 
 		if len(neighbor) != 0 {
 			chosenNeighbor := neighbor[rand.Int()%(len(neighbor))]
