@@ -52,7 +52,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 
 	newNode := node{
 		conf:            conf,
-		stopChannel:     make(chan bool),
+		stopChannel:     make(chan bool, 1),
 		tickerAntiEn:    newTickerAntiEn,
 		tickerHeartBeat: newTickerHeartBeat,
 		ackRecord:       newAckChecker,
