@@ -28,7 +28,6 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	var newStatus safeStatus
 	newStatus.Mutex = &sync.Mutex{}
 	newStatus.realLastStatus = make(map[string]uint)
-	//newStatus.UpdateStatus(nodeAddr, 0)
 
 	var newSentRumor safeRumorMap
 	newSentRumor.Mutex = &sync.Mutex{}
@@ -50,6 +49,14 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newAckChecker.Mutex = &sync.Mutex{}
 	newAckChecker.realAckChecker = make(map[string]*time.Timer)
 
+	var newCatalog safeCatalog
+	newCatalog.Mutex = &sync.Mutex{}
+	newCatalog.realCatalog = make(map[string]map[string]struct{})
+
+	var newReplyChecker replyChecker
+	newReplyChecker.Mutex = &sync.Mutex{}
+	newReplyChecker.realReplyChecker = make(map[string]chan []byte)
+
 	newNode := node{
 		conf:            conf,
 		stopChannel:     make(chan bool, 1),
@@ -58,7 +65,10 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 		ackRecord:       newAckChecker,
 		routingtable:    newRoutingtable,
 		lastStatus:      newStatus,
-		sentRumor:       newSentRumor}
+		sentRumor:       newSentRumor,
+		catalog:         newCatalog,
+		replyRecord:     newReplyChecker}
+	//tag:             newTag}
 
 	// Register the handler
 	conf.MessageRegistry.RegisterMessageCallback(types.ChatMessage{}, newNode.ExecChatMessage)
@@ -67,6 +77,11 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	conf.MessageRegistry.RegisterMessageCallback(types.StatusMessage{}, newNode.ExecStatusMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.EmptyMessage{}, newNode.ExecEmptyMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.PrivateMessage{}, newNode.ExecPrivateMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.DataRequestMessage{}, newNode.ExecDataRequestMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.DataReplyMessage{}, newNode.ExecDataReplyMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.SearchRequestMessage{}, newNode.ExecSearchRequestMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.SearchReplyMessage{}, newNode.ExecSearchReplyMessage)
+	//conf.MessageRegistry.RegisterMessageCallback(types.FileInfo{}, newNode.ExecFileInfo)
 
 	return &newNode
 }
@@ -92,6 +107,19 @@ type node struct {
 	routingtable safeRoutingtable
 	lastStatus   safeStatus
 	sentRumor    safeRumorMap
+	catalog      safeCatalog
+
+	replyRecord replyChecker
+}
+
+func checkTimeoutError(err error, timeout time.Duration) error {
+	var netError net.Error
+	if errors.As(err, &netError) && netError.Timeout() {
+		return transport.TimeoutError(timeout)
+	}
+
+	return err
+
 }
 
 func (n *node) HeartbeatAgency() {
@@ -108,6 +136,7 @@ func (n *node) HeartbeatAgency() {
 		}
 	}()
 }
+
 func (n *node) CheckHeartBeat() {
 	socketAddr := n.conf.Socket.GetAddress()
 	lastSeq, ok := n.lastStatus.FindStatusEntry(socketAddr)
@@ -148,6 +177,7 @@ func (n *node) AntiEntropyAgency() {
 		} // else -> do nothing
 	}()
 }
+
 func (n *node) CheckAntiEntropy() error {
 	socketAddr := n.conf.Socket.GetAddress()
 	neighbor := n.routingtable.FindNeighbor(socketAddr)
@@ -204,16 +234,6 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 
 }
 
-func checkTimeoutError(err error, timeout time.Duration) error {
-	var netError net.Error
-	if errors.As(err, &netError) && netError.Timeout() {
-		return transport.TimeoutError(timeout)
-	}
-
-	return err
-
-}
-
 // Start implements peer.Service
 func (n *node) Start() error {
 	// Start starts the node. It should, among other things, start listening on
@@ -236,7 +256,7 @@ func (n *node) Start() error {
 						continue
 					}
 				}
-				log.Info().Msgf("[Recv] pkt and send to CompareHeader")
+				log.Info().Msgf("[Start] Receive pkt and send to CompareHeader")
 
 				errComp := n.CompareHeader(pkt)
 				if errComp != nil {
@@ -261,14 +281,12 @@ func (n *node) Stop() error {
 		n.tickerAntiEn.T.Stop()
 		n.tickerAntiEn.stopTicker <- true
 	}
-
 	if n.conf.HeartbeatInterval != 0 {
 		n.tickerHeartBeat.T.Stop()
 		n.tickerHeartBeat.stopTicker <- true
 	}
 
 	n.stopChannel <- true
-	log.Info().Msgf("[Stop] 4")
 	return nil
 }
 
@@ -335,12 +353,12 @@ func (n *node) Unicast(dest string, msg transport.Message) error {
 
 	nextHop, ok := n.routingtable.FindRoutingEntry(dest)
 	if !ok {
-		return errors.New("couldn't find the peer")
+		return errors.New("[Unicast] couldn't find the peer")
 	}
+	log.Info().Msgf("[Unicast] [%v] => [%v]", socketAddr, nextHop)
 
 	err := n.conf.Socket.Send(nextHop, pktNew, 0)
 	return checkTimeoutError(err, 0)
-
 }
 
 // Broadcast implements peer.Messaging

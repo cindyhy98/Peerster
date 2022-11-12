@@ -1,6 +1,7 @@
 package impl
 
 import (
+	"errors"
 	"github.com/rs/zerolog/log"
 	"go.dedis.ch/cs438/transport"
 	"go.dedis.ch/cs438/types"
@@ -362,3 +363,66 @@ func (n *node) ExecPrivateMessage(msg types.Message, pkt transport.Packet) error
 	return nil
 
 }
+
+func (n *node) ExecDataRequestMessage(msg types.Message, pkt transport.Packet) error {
+	msgDataRequest, ok := msg.(*types.DataRequestMessage)
+	if !ok {
+		return xerrors.Errorf("wrong type: %T", msg)
+	}
+
+	log.Info().Msgf("[ExecDataRequestMessage] %v ", msgDataRequest)
+
+	// send back a reply message
+	newDataReplyMsg := types.DataReplyMessage{
+		RequestID: msgDataRequest.RequestID,
+		Key:       msgDataRequest.Key,
+		Value:     n.conf.Storage.GetDataBlobStore().Get(msgDataRequest.Key),
+	}
+
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newDataReplyMsg)
+	log.Info().Msgf("[ExecDataRequestMessage] [%v] DataReply => [%v] ", n.conf.Socket.GetAddress(), pkt.Header.Source)
+	err := n.Unicast(pkt.Header.Source, transMsg)
+
+	if err != nil {
+		log.Error().Msgf("[ExecDataRequestMessage Error] %v", err)
+		return err
+	}
+	// should call Unicast to send back the data!
+	return nil
+}
+
+func (n *node) ExecDataReplyMessage(msg types.Message, pkt transport.Packet) error {
+	msgDataReply, ok := msg.(*types.DataReplyMessage)
+	if !ok {
+		return xerrors.Errorf("wrong type: %T", msg)
+	}
+
+	log.Info().Msgf("[ExecDataReplyMessage] %v ", msgDataReply)
+
+	// store chunk in local
+	if msgDataReply.Value != nil {
+
+		n.replyRecord.UpdateReplyEntry(msgDataReply.RequestID, msgDataReply.Value)
+
+		// TODO: store not only the metahash, but also details of each chunk
+		n.conf.Storage.GetDataBlobStore().Set(msgDataReply.Key, msgDataReply.Value)
+
+		log.Info().Msgf("[ExecDataReplyMessage] store chunk of key %v in local storage", msgDataReply.Key)
+		return nil
+	} else {
+		return errors.New("entry not found")
+	}
+
+}
+
+func (n *node) ExecSearchRequestMessage(msg types.Message, pkt transport.Packet) error {
+	return nil
+}
+
+func (n *node) ExecSearchReplyMessage(msg types.Message, pkt transport.Packet) error {
+	return nil
+}
+
+//func (n *node) ExecFileInfo(msg types.Message, pkt transport.Packet) error {
+//	return nil
+//}
