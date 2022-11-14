@@ -137,6 +137,7 @@ func checkTimeoutError(err error, timeout time.Duration) error {
 func (n *node) HeartbeatAgency() {
 	go func() {
 		if n.conf.HeartbeatInterval != 0 {
+			n.CheckHeartBeat()
 			for {
 				select {
 				case <-n.tickerHeartBeat.stopTicker:
@@ -177,6 +178,7 @@ func (n *node) CheckHeartBeat() {
 func (n *node) AntiEntropyAgency() {
 	go func() {
 		if n.conf.AntiEntropyInterval != 0 {
+			//_ = n.CheckAntiEntropy()
 			for {
 				select {
 				case <-n.tickerAntiEn.stopTicker:
@@ -372,7 +374,7 @@ func (n *node) Unicast(dest string, msg transport.Message) error {
 	if !ok {
 		return errors.New("[Unicast] couldn't find the peer")
 	}
-	log.Info().Msgf("[Unicast] [%v] => [%v]", socketAddr, nextHop)
+	//log.Info().Msgf("[Unicast] [%v] => [%v]", socketAddr, nextHop)
 
 	err := n.conf.Socket.Send(nextHop, pktNew, 0)
 	return checkTimeoutError(err, 0)

@@ -112,6 +112,7 @@ func (n *node) FindChunkFromLocal(metafile []byte) ([]byte, error) {
 
 func (n *node) SendSearchRequest(reg string, budget uint, chosenNeighbor string, requestID string, origin string) error {
 	// send request to a chosenNeighbor
+
 	newSearchReqMsg := types.SearchRequestMessage{
 		RequestID: requestID,
 		Origin:    origin,
@@ -127,23 +128,24 @@ func (n *node) SendSearchRequest(reg string, budget uint, chosenNeighbor string,
 
 }
 
-func (n *node) WaitForSearchReply(timeout time.Duration, requestID string) error {
+func (n *node) WaitForSearchReply(timeout time.Duration, channel chan []types.FileInfo) ([]types.FileInfo, error) {
 	//wait for reply!!
-	n.searchReply.InitSearchReplyChecker(requestID)
-	defer n.searchReply.DeleteSearchReplyChecker(requestID)
 
-	// TODO: need to delete the channel
-	for hashTimeout := false; !hashTimeout; {
+	totalData := make([]types.FileInfo, 0)
+
+	for hasTimeout := false; !hasTimeout; {
 		select {
-		case data := <-n.searchReply.FindSearchReplyEntry(requestID):
+		case data := <-channel:
 			log.Info().Msgf("[WaitForSearchReply] find the reply entry %v "+
 				"but shouldn't deal with it before timeout", data)
+			totalData = append(totalData, data...)
 		case <-time.After(timeout):
-			hashTimeout = true
+			log.Info().Msgf("[WaitForSearchReply] timeout reaches")
+			hasTimeout = true
 		}
 	}
 
-	return nil
+	return totalData, nil
 
 }
 
@@ -220,6 +222,37 @@ func (n *node) FindFullTagFromLocal(reg regexp.Regexp) (string, error) {
 
 	return resultName, nil
 
+}
+
+func (n *node) CheckIfAllChunkAvailable(filesInfo []types.FileInfo) (string, bool) {
+	isAllChunkAvaliable := true
+	foundName := ""
+
+	if filesInfo == nil {
+		return "", false
+	}
+
+	for _, file := range filesInfo {
+		log.Info().Msgf("[CheckIfAllChunkAvailable] filename = %v, chunks = %v", file.Name, file.Chunks)
+		for _, chunkhash := range file.Chunks {
+			// if there is a nil chunk -> this is not a full match
+			if chunkhash == nil {
+				isAllChunkAvaliable = false
+				break
+			}
+
+		}
+
+		if isAllChunkAvaliable {
+			foundName = file.Name
+			break
+		}
+		isAllChunkAvaliable = true
+
+	}
+	log.Info().Msgf("[CheckIfAllChunkAvailable] foundName %v, isAllChunkAvaliable %v", foundName, isAllChunkAvaliable)
+
+	return foundName, isAllChunkAvaliable
 }
 
 /* Main functions for datasharing */
@@ -385,11 +418,13 @@ func (n *node) SearchAll(reg regexp.Regexp, budget uint, timeout time.Duration) 
 		case 0:
 			for i := 0; i < int(budget); i++ {
 				requestID := xid.New().String()
+				channel := n.searchReply.InitSearchReplyChecker(requestID)
 				log.Info().Msgf("[SearchAll] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[i])
 				_ = n.SendSearchRequest(reg.String(), uint(1), shuffleNeighbors[i], requestID, n.conf.Socket.GetAddress())
 
 				// Error handling?
-				_ = n.WaitForSearchReply(timeout, requestID)
+				_, _ = n.WaitForSearchReply(timeout, channel)
+				n.searchReply.DeleteSearchReplyChecker(requestID)
 			}
 		default:
 			for i := 0; i < len(shuffleNeighbors); i++ {
@@ -399,10 +434,12 @@ func (n *node) SearchAll(reg regexp.Regexp, budget uint, timeout time.Duration) 
 					budgetPerNeighbor = budget - usedBudget
 				}
 				requestID := xid.New().String()
+				channel := n.searchReply.InitSearchReplyChecker(requestID)
 				log.Info().Msgf("[SearchAll] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[i])
 				_ = n.SendSearchRequest(reg.String(), budgetPerNeighbor, shuffleNeighbors[i], requestID, n.conf.Socket.GetAddress())
 				// Error handling?
-				_ = n.WaitForSearchReply(timeout, requestID)
+				_, _ = n.WaitForSearchReply(timeout, channel)
+				n.searchReply.DeleteSearchReplyChecker(requestID)
 			}
 
 		}
@@ -424,6 +461,7 @@ func (n *node) SearchFirst(pattern regexp.Regexp, conf peer.ExpandingRing) (name
 	// peer update its catalog and name storage according to the
 	// SearchReplyMessages received. Returns an empty string if nothing was
 	// found.
+
 	log.Info().Msgf("[SearchFirst] conf initial = %v, factor = %v, retry = %v, timeout = %v",
 		conf.Initial, conf.Factor, conf.Retry, conf.Timeout)
 
@@ -439,19 +477,25 @@ func (n *node) SearchFirst(pattern regexp.Regexp, conf peer.ExpandingRing) (name
 		neighbors := n.routingtable.FindNeighbor(n.conf.Socket.GetAddress())
 		budget := conf.Initial
 		for i := 0; i < int(conf.Retry); i++ {
-
+			log.Info().Msgf("[SearchFirst] with budget = %v", budget)
 			shuffleNeighbors, budgetPerNeighbor := n.FindBudgetPerNeighbor(neighbors, budget)
 			if len(shuffleNeighbors) != 0 {
 				switch budgetPerNeighbor {
 				case 0:
 					for j := 0; j < int(budget); j++ {
 						requestID := xid.New().String()
-						log.Info().Msgf("[SearchAll] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[j])
+						channel := n.searchReply.InitSearchReplyChecker(requestID)
+						log.Info().Msgf("[SearchFirst] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[j])
 						_ = n.SendSearchRequest(pattern.String(), uint(1), shuffleNeighbors[j], requestID, n.conf.Socket.GetAddress())
 
 						// Error handling?
-						_ = n.WaitForSearchReply(conf.Timeout, requestID)
+						receivedData, _ := n.WaitForSearchReply(conf.Timeout, channel)
+						n.searchReply.DeleteSearchReplyChecker(requestID)
+						foundNameFromPeer, isAllChunkAvaliable := n.CheckIfAllChunkAvailable(receivedData)
 
+						if foundNameFromPeer != "" && isAllChunkAvaliable {
+							return foundNameFromPeer, nil
+						}
 					}
 				default:
 					for j := 0; j < len(shuffleNeighbors); j++ {
@@ -461,18 +505,26 @@ func (n *node) SearchFirst(pattern regexp.Regexp, conf peer.ExpandingRing) (name
 							budgetPerNeighbor = budget - usedBudget
 						}
 						requestID := xid.New().String()
-						log.Info().Msgf("[SearchAll] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[j])
+						channel := n.searchReply.InitSearchReplyChecker(requestID)
+						log.Info().Msgf("[SearchFirst] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[j])
 						_ = n.SendSearchRequest(pattern.String(), budgetPerNeighbor, shuffleNeighbors[j], requestID, n.conf.Socket.GetAddress())
 						// Error handling?
-						_ = n.WaitForSearchReply(conf.Timeout, requestID)
+						receivedData, _ := n.WaitForSearchReply(conf.Timeout, channel)
+						n.searchReply.DeleteSearchReplyChecker(requestID)
+
+						foundNameFromPeer, isAllChunkAvaliable := n.CheckIfAllChunkAvailable(receivedData)
+
+						if foundNameFromPeer != "" && isAllChunkAvaliable {
+							return foundNameFromPeer, nil
+						}
 					}
 
 				}
 
 			} else {
 				// no neighbor -> only return the node's matching names
-				// budgetPerNeighbor = -1
 			}
+			budget = budget * conf.Factor
 		}
 
 		//

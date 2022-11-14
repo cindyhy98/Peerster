@@ -526,7 +526,6 @@ func (n *node) ExecSearchRequestMessage(msg types.Message, pkt transport.Packet)
 
 	if msgSearchRequest.Origin != pkt.Header.Source {
 		// this is a forwarded searchReq
-		log.Info().Msgf("[Forwarded Reply] Response = %v", newSearchReplyMsg.Responses)
 		header := transport.NewHeader(
 			n.conf.Socket.GetAddress(), // source
 			n.conf.Socket.GetAddress(), // relay
@@ -545,7 +544,7 @@ func (n *node) ExecSearchRequestMessage(msg types.Message, pkt transport.Packet)
 		}
 	} else {
 		// this is the original searchReq
-		log.Info().Msgf("[Original Reply] Response = %v", newSearchReplyMsg.Responses)
+
 		log.Info().Msgf("[ExecSearchRequestMessage] [%v] Original SearchReply => [%v] ", n.conf.Socket.GetAddress(), pkt.Header.Source)
 		err := n.Unicast(pkt.Header.Source, transMsg)
 
@@ -589,6 +588,7 @@ func (n *node) ExecSearchReplyMessage(msg types.Message, pkt transport.Packet) e
 			//log.Info().Msgf("[ExecSearchReplyMessage] Updated catalog = %v", n.GetCatalog())
 
 		}
+
 		n.searchReply.UpdateSearchReplyEntry(msgSearchReply.RequestID, msgSearchReply.Responses)
 
 	} else {
