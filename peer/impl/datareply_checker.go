@@ -4,42 +4,41 @@ import (
 	"sync"
 )
 
-type replyChecker struct {
+type dataReplyChecker struct {
 	*sync.Mutex
-	realReplyChecker map[string]chan []byte
+	realDataReplyChecker map[string]chan []byte
 }
 
-func (rc *replyChecker) OpenReplyChecker(key string) {
-	rc.Lock()
-	defer rc.Unlock()
+func (drc *dataReplyChecker) InitDataReplyChecker(key string) {
+	drc.Lock()
+	defer drc.Unlock()
+
+	drc.realDataReplyChecker[key] = make(chan []byte)
+}
+
+func (drc *dataReplyChecker) UpdateDataReplyEntry(key string, data []byte) {
+	drc.Lock()
+	defer drc.Unlock()
 
 	// Question: Is the functionality correct?
-	rc.realReplyChecker[key] = make(chan []byte)
+	drc.realDataReplyChecker[key] <- data
 }
 
-func (rc *replyChecker) UpdateReplyEntry(key string, data []byte) {
-	rc.Lock()
-	defer rc.Unlock()
+func (drc *dataReplyChecker) FindDataReplyEntry(key string) chan []byte {
+	drc.Lock()
+	defer drc.Unlock()
 
-	// Question: Is the functionality correct?
-	rc.realReplyChecker[key] <- data
-}
-
-func (rc *replyChecker) FindReplyEntry(key string) chan []byte {
-	rc.Lock()
-	defer rc.Unlock()
-
-	return rc.realReplyChecker[key]
+	return drc.realDataReplyChecker[key]
 }
 
 // Not sure if we need this or not
 /*
-func (rc *replyChecker) Freeze() map[string]chan []byte {
+func (drc *dataReplyChecker) Freeze() map[string]chan []byte {
 	copyOfMap := map[string]chan []byte
 
-	rc.Lock()
-	defer rc.Unlock()
-	for k, v := range rc.realReplyChecker {
+	drc.Lock()
+	defer drc.Unlock()
+	for k, v := range drc.realDataReplyChecker {
 		copyOfMap[k] = v
 	}
 	return copyOfMap

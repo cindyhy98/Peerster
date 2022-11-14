@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+/* Supplement functions for datasharing */
+
 func (n *node) SHA(chunk []byte) ([]byte, string) {
 	// Calculate the hex-encoded chunk’s hash
 	h := crypto.SHA256.New()
@@ -41,10 +43,10 @@ func (n *node) SendDataRequest(metahash string, chosenPeer string, timeout time.
 	if err != nil {
 		return nil, err
 	}
-	n.replyRecord.OpenReplyChecker(requestID)
+	n.dataReply.InitDataReplyChecker(requestID)
 
 	select {
-	case data := <-n.replyRecord.FindReplyEntry(requestID):
+	case data := <-n.dataReply.FindDataReplyEntry(requestID):
 		log.Info().Msgf("[SendDataRequest] find the reply entry")
 		return data, nil
 	case <-time.After(timeout):
@@ -107,6 +109,122 @@ func (n *node) FindChunkFromLocal(metafile []byte) ([]byte, error) {
 	}
 	return chunksFile, nil
 }
+
+func (n *node) SendSearchRequest(reg string, budget uint, chosenNeighbor string, requestID string, origin string) error {
+	// send request to a chosenNeighbor
+	newSearchReqMsg := types.SearchRequestMessage{
+		RequestID: requestID,
+		Origin:    origin,
+		Pattern:   reg,
+		Budget:    budget,
+	}
+
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newSearchReqMsg)
+	err := n.Unicast(chosenNeighbor, transMsg)
+
+	// Question: is this correct?
+	return err
+
+}
+
+func (n *node) WaitForSearchReply(timeout time.Duration, requestID string) error {
+	//wait for reply!!
+	n.searchReply.InitSearchReplyChecker(requestID)
+	totalSearchReplyData := make([]string, 0)
+
+	data := <-n.searchReply.FindSearchReplyEntry(requestID)
+	log.Info().Msgf("[WaitForSearchReply] find the reply entry %v "+
+		"but shouldn't deal with it before timeout", data)
+	totalSearchReplyData = append(totalSearchReplyData, data...)
+	//return nil
+
+	select {
+	case <-time.After(timeout):
+		if totalSearchReplyData != nil {
+			return nil
+		} else {
+			return errors.New("search data timeout")
+		}
+	}
+
+}
+
+func (n *node) FindBudgetPerNeighbor(neighbors []string, budget uint) ([]string, uint) {
+
+	if len(neighbors) != 0 {
+		// Shuffle the neighbor
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(len(neighbors), func(i, j int) {
+			neighbors[i], neighbors[j] = neighbors[j], neighbors[i]
+		})
+
+		budgetPerNeighbor := budget / uint(len(neighbors))
+		return neighbors, budgetPerNeighbor
+
+	} else {
+		// no neighbor -> only return the node's matching names
+		return []string{}, uint(0)
+	}
+
+}
+
+func (n *node) FindTagFromLocal(reg regexp.Regexp) ([]string, error) {
+	// Update every tag from the neighbors to this tagCopy and then return these tag string in the end
+	// Get the storage from n.conf
+	names := make([]string, 0)
+
+	n.conf.Storage.GetNamingStore().ForEach(func(name string, metahash []byte) bool {
+		switch reg.MatchString(name) {
+		case true:
+			names = append(names, name)
+		case false:
+			// Do nothing
+		}
+		return true
+	})
+
+	return names, nil
+}
+
+func (n *node) FindFullTagFromLocal(reg regexp.Regexp) ([]string, error) {
+	names := make([]string, 0)
+
+	// suppose local has everything
+	localHasEverything := true
+
+	n.conf.Storage.GetNamingStore().ForEach(func(name string, metahash []byte) bool {
+		switch reg.MatchString(name) {
+		case true:
+			// the filename matches -> see if everything is in the node's DataBlobStorage
+			metafile := n.conf.Storage.GetDataBlobStore().Get(string(metahash))
+			if metafile != nil {
+				metafileTrim := bytes.Split(metafile, []byte(peer.MetafileSep))
+				for _, chunkHashHex := range metafileTrim {
+					if n.conf.Storage.GetDataBlobStore().Get(string(chunkHashHex)) == nil {
+						localHasEverything = false
+					}
+				}
+			}
+
+			if localHasEverything {
+				names = append(names, name)
+			} else {
+				names = make([]string, 0)
+				return false
+			}
+		case false:
+			// Do nothing
+		}
+		return true
+	})
+
+	log.Info().Msgf("[FindTagFromLocal] localHasEverything = %v, total names = %v", localHasEverything, names)
+
+	return names, nil
+
+}
+
+/* Main functions for datasharing */
 
 func (n *node) Upload(data io.Reader) (metahash string, err error) {
 	// Upload stores a new data blob on the peer and will make it available to
@@ -229,6 +347,9 @@ func (n *node) UpdateCatalog(key string, peer string) {
 func (n *node) Tag(name string, mh string) error {
 	// Tag creates a mapping between a (file)name and a metahash
 	log.Info().Msgf("[Tag] Store %v:%v in NamingStore", name, mh)
+
+	// maybe don't need this
+	n.tag.UpdateTagRecord(name, mh)
 	n.conf.Storage.GetNamingStore().Set(name, []byte(mh))
 
 	// Question: when will return error??
@@ -257,7 +378,63 @@ func (n *node) SearchAll(reg regexp.Regexp, budget uint, timeout time.Duration) 
 	// received. Returns an empty result if nothing found. An error is returned
 	// in case of an exceptional event.
 
-	tmpString := make([]string, 0)
+	// Find all neighbors of this node
+	neighbors := n.routingtable.FindNeighbor(n.conf.Socket.GetAddress())
+	shuffleNeighbors, budgetPerNeighbor := n.FindBudgetPerNeighbor(neighbors, budget)
 
-	return tmpString, nil
+	if len(shuffleNeighbors) != 0 {
+		switch budgetPerNeighbor {
+		case 0:
+			for i := 0; i < int(budget); i++ {
+				requestID := xid.New().String()
+				log.Info().Msgf("[SearchAll] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[i])
+				_ = n.SendSearchRequest(reg.String(), uint(1), shuffleNeighbors[i], requestID, n.conf.Socket.GetAddress())
+
+				// Error handling?
+				_ = n.WaitForSearchReply(timeout, requestID)
+			}
+		default:
+			for i := 0; i < len(shuffleNeighbors); i++ {
+				if i == len(shuffleNeighbors)-1 {
+					// last one -> budget should be the rest
+					usedBudget := uint(len(shuffleNeighbors)-1) * budgetPerNeighbor
+					budgetPerNeighbor = budget - usedBudget
+				}
+				requestID := xid.New().String()
+				log.Info().Msgf("[SearchAll] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[i])
+				_ = n.SendSearchRequest(reg.String(), budgetPerNeighbor, shuffleNeighbors[i], requestID, n.conf.Socket.GetAddress())
+				// Error handling?
+				_ = n.WaitForSearchReply(timeout, requestID)
+			}
+
+		}
+
+	} else {
+		// no neighbor -> only return the node's matching names
+		// budgetPerNeighbor = -1
+	}
+
+	// TODO: need some error handling
+	names, err = n.FindTagFromLocal(reg)
+
+	return names, err
+}
+
+func (n *node) SearchFirst(pattern regexp.Regexp, conf peer.ExpandingRing) (name string, err error) {
+	// SearchFirst uses an expanding ring configuration and returns a name as
+	// soon as it finds a peer that "fully matches" a data blob. It makes the
+	// peer update its catalog and name storage according to the
+	// SearchReplyMessages received. Returns an empty string if nothing was
+	// found.
+	log.Info().Msgf("[SearchFirst] conf initial = %v, factor = %v, retry = %v, timeout = %v",
+		conf.Initial, conf.Factor, conf.Retry, conf.Timeout)
+
+	// First check if it has everything in local
+	_, err = n.FindFullTagFromLocal(pattern)
+	// Find all neighbors of this node
+	//neighbors := n.routingtable.FindNeighbor(n.conf.Socket.GetAddress())
+	//shuffleNeighbors, budgetPerNeighbor := n.FindBudgetPerNeighbor(neighbors, conf.Initial)
+	//
+
+	return "", nil
 }

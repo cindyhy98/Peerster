@@ -1,15 +1,20 @@
 package impl
 
 import (
+	"bytes"
 	"errors"
 	"github.com/rs/zerolog/log"
+	"go.dedis.ch/cs438/peer"
 	"go.dedis.ch/cs438/transport"
 	"go.dedis.ch/cs438/types"
 	"golang.org/x/xerrors"
 	"math/rand"
+	"regexp"
 	"sort"
 	"time"
 )
+
+/* Supplement functions for Message Handler */
 
 func Contains(s []string, e string) bool {
 	for _, a := range s {
@@ -140,6 +145,93 @@ func (n *node) WaitForAck(pkt transport.Packet, msgRumor *types.RumorsMessage, n
 		}()
 	}
 }
+
+func (n *node) SearchForMatchFile(pattern string) []types.FileInfo {
+	// convert pattern string to a regexp.Regexp
+	reg := regexp.MustCompile(pattern)
+	filesInfo := make([]types.FileInfo, 0)
+
+	n.conf.Storage.GetNamingStore().ForEach(func(name string, metahash []byte) bool {
+		switch reg.MatchString(name) {
+		case true:
+			//log.Info().Msgf("[SearchForMatchFile] match file name(%v)", name)
+			// Find Metafile from local
+			metafile := n.conf.Storage.GetDataBlobStore().Get(string(metahash))
+			if metafile == nil {
+				//log.Info().Msgf("[SearchForMatchFile] match files name(%v) but metafile is empty", name)
+				return true
+			}
+
+			chunksFile := make([][]byte, 0)
+			metafileTrim := bytes.Split(metafile, []byte(peer.MetafileSep))
+			for _, chunkHashHex := range metafileTrim {
+				//log.Info().Msgf("[SearchForMatchFile] chunk hash (%v)", string(chunkHashHex))
+				chunk := n.conf.Storage.GetDataBlobStore().Get(string(chunkHashHex))
+				if chunk == nil {
+					chunksFile = append(chunksFile, nil)
+				} else {
+					chunksFile = append(chunksFile, chunkHashHex)
+				}
+			}
+			//log.Info().Msgf("[SearchForMatchFile] local chunksFile = %v", chunksFile)
+
+			file := types.FileInfo{
+				Name:     name,
+				Metahash: string(metahash),
+				Chunks:   chunksFile,
+			}
+			filesInfo = append(filesInfo, file)
+		case false:
+			// Do nothing
+			//log.Info().Msgf("[SearchForMatchFile] doesn't match the file name")
+		}
+
+		return true
+	})
+
+	log.Info().Msgf("[SearchForMatchFile] in node(%v) filesInfo = %v", n.conf.Socket.GetAddress(), filesInfo)
+	return filesInfo
+}
+
+func (n *node) ForwardSearchRequest(searchReq *types.SearchRequestMessage, neighbors []string) error {
+
+	//neighbors := n.routingtable.FindNeighbor(n.conf.Socket.GetAddress())
+
+	remainingBudget := searchReq.Budget - 1
+	log.Info().Msgf("[ForwardSearchRequest] Remaining budget = %v, NumberOfNeighbors = %v", remainingBudget, len(neighbors))
+	shuffleNeighbors, budgetPerNeighbor := n.FindBudgetPerNeighbor(neighbors, remainingBudget)
+
+	if len(shuffleNeighbors) != 0 && remainingBudget != 0 {
+		switch budgetPerNeighbor {
+		case 0:
+			for i := 0; i < int(remainingBudget); i++ {
+
+				log.Info().Msgf("[ForwardSearchRequest] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[i])
+				_ = n.SendSearchRequest(searchReq.Pattern, uint(1), shuffleNeighbors[i], searchReq.RequestID, searchReq.Origin)
+
+			}
+		default:
+			for i := 0; i < len(shuffleNeighbors); i++ {
+
+				if i == len(shuffleNeighbors)-1 {
+					// last one -> budget should be the rest
+					usedBudget := uint(len(shuffleNeighbors)-1) * budgetPerNeighbor
+					budgetPerNeighbor = remainingBudget - usedBudget
+				}
+
+				log.Info().Msgf("[ForwardSearchRequest] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[i])
+				_ = n.SendSearchRequest(searchReq.Pattern, budgetPerNeighbor, shuffleNeighbors[i], searchReq.RequestID, searchReq.Origin)
+
+			}
+
+		}
+
+	}
+
+	return nil
+}
+
+/* Exec Message Handler */
 
 func (n *node) ExecRumorsMessage(msg types.Message, pkt transport.Packet) error {
 	msgRumor, ok := msg.(*types.RumorsMessage)
@@ -402,9 +494,7 @@ func (n *node) ExecDataReplyMessage(msg types.Message, pkt transport.Packet) err
 	// store chunk in local
 	if msgDataReply.Value != nil {
 
-		n.replyRecord.UpdateReplyEntry(msgDataReply.RequestID, msgDataReply.Value)
-
-		// TODO: store not only the metahash, but also details of each chunk
+		n.dataReply.UpdateDataReplyEntry(msgDataReply.RequestID, msgDataReply.Value)
 		n.conf.Storage.GetDataBlobStore().Set(msgDataReply.Key, msgDataReply.Value)
 
 		log.Info().Msgf("[ExecDataReplyMessage] store chunk of key %v in local storage", msgDataReply.Key)
@@ -416,10 +506,95 @@ func (n *node) ExecDataReplyMessage(msg types.Message, pkt transport.Packet) err
 }
 
 func (n *node) ExecSearchRequestMessage(msg types.Message, pkt transport.Packet) error {
+	msgSearchRequest, ok := msg.(*types.SearchRequestMessage)
+	if !ok {
+		return xerrors.Errorf("wrong type: %T", msg)
+	}
+
+	//log.Info().Msgf("[ExecSearchRequestMessage] %v ", msgSearchRequest)
+
+	// Forward the searchRequest if budget permits
+	neighbors := n.routingtable.FindNeighborWithoutContain(n.conf.Socket.GetAddress(), pkt.Header.Source)
+	_ = n.ForwardSearchRequest(msgSearchRequest, neighbors)
+
+	newSearchReplyMsg := types.SearchReplyMessage{
+		RequestID: msgSearchRequest.RequestID,
+		Responses: n.SearchForMatchFile(msgSearchRequest.Pattern),
+	}
+
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newSearchReplyMsg)
+
+	if msgSearchRequest.Origin != pkt.Header.Source {
+		// this is a forwarded searchReq
+		log.Info().Msgf("[Forwarded Reply] Response = %v", newSearchReplyMsg.Responses)
+		header := transport.NewHeader(
+			n.conf.Socket.GetAddress(), // source
+			n.conf.Socket.GetAddress(), // relay
+			msgSearchRequest.Origin,    // destination
+			0,                          // TTL
+		)
+		pktNew := transport.Packet{
+			Header: &header,
+			Msg:    &transMsg,
+		}
+		log.Info().Msgf("[ExecSearchRequestMessage] [%v] Forwarded SearchReply => [%v] ", n.conf.Socket.GetAddress(), pkt.Header.Source)
+		err := n.conf.Socket.Send(pkt.Header.Source, pktNew, 0)
+		if err != nil {
+			log.Error().Msgf("[ExecSearchRequestMessage Error] %v", err)
+			return err
+		}
+	} else {
+		// this is the original searchReq
+		log.Info().Msgf("[Original Reply] Response = %v", newSearchReplyMsg.Responses)
+		log.Info().Msgf("[ExecSearchRequestMessage] [%v] Original SearchReply => [%v] ", n.conf.Socket.GetAddress(), pkt.Header.Source)
+		err := n.Unicast(pkt.Header.Source, transMsg)
+
+		if err != nil {
+			log.Error().Msgf("[ExecSearchRequestMessage Error] %v", err)
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (n *node) ExecSearchReplyMessage(msg types.Message, pkt transport.Packet) error {
+	msgSearchReply, ok := msg.(*types.SearchReplyMessage)
+	if !ok {
+		return xerrors.Errorf("wrong type: %T", msg)
+	}
+
+	log.Info().Msgf("[ExecSearchReplyMessage] %v ", msgSearchReply)
+
+	// store naming in local
+	if msgSearchReply.Responses != nil {
+		allFileName := make([]string, 0)
+		for _, file := range msgSearchReply.Responses {
+
+			allFileName = append(allFileName, file.Name)
+			// Update the naming store
+			log.Info().Msgf("[ExecSearchReplyMessage] Store %v:%v in NamingStore", file.Name, file.Metahash)
+			n.conf.Storage.GetNamingStore().Set(file.Name, []byte(file.Metahash))
+
+			// Update catalog
+			//log.Info().Msgf("[ExecSearchReplyMessage] Original catalog = %v", n.GetCatalog())
+			n.UpdateCatalog(file.Metahash, pkt.Header.Source)
+			for _, chunkhash := range file.Chunks {
+				// Question: is the peer addr correct??
+				if chunkhash != nil {
+					n.UpdateCatalog(string(chunkhash), pkt.Header.Source)
+				}
+
+			}
+			//log.Info().Msgf("[ExecSearchReplyMessage] Updated catalog = %v", n.GetCatalog())
+
+		}
+		n.searchReply.UpdateSearchReplyEntry(msgSearchReply.RequestID, allFileName)
+
+	} else {
+
+	}
+
 	return nil
 }
 

@@ -53,9 +53,17 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newCatalog.Mutex = &sync.Mutex{}
 	newCatalog.realCatalog = make(map[string]map[string]struct{})
 
-	var newReplyChecker replyChecker
-	newReplyChecker.Mutex = &sync.Mutex{}
-	newReplyChecker.realReplyChecker = make(map[string]chan []byte)
+	var newDataReplyChecker dataReplyChecker
+	newDataReplyChecker.Mutex = &sync.Mutex{}
+	newDataReplyChecker.realDataReplyChecker = make(map[string]chan []byte)
+
+	var newSearchReplyChecker searchReplyChecker
+	newSearchReplyChecker.Mutex = &sync.Mutex{}
+	newSearchReplyChecker.realSearchReplyChecker = make(map[string]chan []string)
+
+	var newTag safeTag
+	newTag.Mutex = &sync.Mutex{}
+	newTag.realTag = make(map[string]string)
 
 	newNode := node{
 		conf:            conf,
@@ -67,7 +75,9 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 		lastStatus:      newStatus,
 		sentRumor:       newSentRumor,
 		catalog:         newCatalog,
-		replyRecord:     newReplyChecker}
+		dataReply:       newDataReplyChecker,
+		searchReply:     newSearchReplyChecker,
+		tag:             newTag}
 	//tag:             newTag}
 
 	// Register the handler
@@ -108,8 +118,10 @@ type node struct {
 	lastStatus   safeStatus
 	sentRumor    safeRumorMap
 	catalog      safeCatalog
+	tag          safeTag
 
-	replyRecord replyChecker
+	dataReply   dataReplyChecker
+	searchReply searchReplyChecker
 }
 
 func checkTimeoutError(err error, timeout time.Duration) error {
@@ -210,13 +222,17 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 	if pktDest == socketAddr {
 		// the received packet is for this node
 		// -> the registry must be used to execute the callback associated with the message contained in the packet
-		//log.Info().Msgf("[CompareHeader] Call ProcessPacket")
-		_ = n.conf.MessageRegistry.ProcessPacket(pkt)
+		err := n.conf.MessageRegistry.ProcessPacket(pkt)
+		if err != nil {
+			log.Error().Msgf("[CompareHeader Error] %v", err)
+			return err
+		}
 
 	} else {
 		// else
 		// the packet is to be relayed
 		// -> update the RelayedBy field of the packet’s header to the peer’s socket address.
+
 		pkt.Header.RelayedBy = socketAddr
 		pkt.Header.TTL--
 
@@ -294,6 +310,7 @@ func (n *node) Stop() error {
 func (n *node) AddPeer(addr ...string) {
 	// AddPeer adds new known addresses to the node. It must update the
 	// routing table of the node. Adding ourselves should have no effect.
+
 	socketAddr := n.conf.Socket.GetAddress()
 	for _, peerAddr := range addr {
 		// lock defer unlock

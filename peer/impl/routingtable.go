@@ -1,7 +1,6 @@
 package impl
 
 import (
-	"github.com/rs/zerolog/log"
 	"go.dedis.ch/cs438/peer"
 	"math/rand"
 	"sync"
@@ -67,6 +66,6 @@ func (t *safeRoutingtable) FindNeighborWithoutContain(origin string, addr string
 		}
 	}
 
-	log.Info().Msgf("[FindNeighborWithoutContain] all neighbor = %v", neighbor)
+	//log.Info().Msgf("[FindNeighborWithoutContain] all neighbor = %v", neighbor)
 	return neighbor
 }
