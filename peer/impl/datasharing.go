@@ -130,22 +130,20 @@ func (n *node) SendSearchRequest(reg string, budget uint, chosenNeighbor string,
 func (n *node) WaitForSearchReply(timeout time.Duration, requestID string) error {
 	//wait for reply!!
 	n.searchReply.InitSearchReplyChecker(requestID)
-	totalSearchReplyData := make([]string, 0)
+	defer n.searchReply.DeleteSearchReplyChecker(requestID)
 
-	data := <-n.searchReply.FindSearchReplyEntry(requestID)
-	log.Info().Msgf("[WaitForSearchReply] find the reply entry %v "+
-		"but shouldn't deal with it before timeout", data)
-	totalSearchReplyData = append(totalSearchReplyData, data...)
-	//return nil
-
-	select {
-	case <-time.After(timeout):
-		if totalSearchReplyData != nil {
-			return nil
-		} else {
-			return errors.New("search data timeout")
+	// TODO: need to delete the channel
+	for hashTimeout := false; !hashTimeout; {
+		select {
+		case data := <-n.searchReply.FindSearchReplyEntry(requestID):
+			log.Info().Msgf("[WaitForSearchReply] find the reply entry %v "+
+				"but shouldn't deal with it before timeout", data)
+		case <-time.After(timeout):
+			hashTimeout = true
 		}
 	}
+
+	return nil
 
 }
 
@@ -186,8 +184,8 @@ func (n *node) FindTagFromLocal(reg regexp.Regexp) ([]string, error) {
 	return names, nil
 }
 
-func (n *node) FindFullTagFromLocal(reg regexp.Regexp) ([]string, error) {
-	names := make([]string, 0)
+func (n *node) FindFullTagFromLocal(reg regexp.Regexp) (string, error) {
+	resultName := ""
 
 	// suppose local has everything
 	localHasEverything := true
@@ -207,9 +205,9 @@ func (n *node) FindFullTagFromLocal(reg regexp.Regexp) ([]string, error) {
 			}
 
 			if localHasEverything {
-				names = append(names, name)
+				resultName = name
+				return true
 			} else {
-				names = make([]string, 0)
 				return false
 			}
 		case false:
@@ -218,9 +216,9 @@ func (n *node) FindFullTagFromLocal(reg regexp.Regexp) ([]string, error) {
 		return true
 	})
 
-	log.Info().Msgf("[FindTagFromLocal] localHasEverything = %v, total names = %v", localHasEverything, names)
+	log.Info().Msgf("[FindTagFromLocal] localHasEverything = %v, found name = %v", localHasEverything, resultName)
 
-	return names, nil
+	return resultName, nil
 
 }
 
@@ -430,11 +428,55 @@ func (n *node) SearchFirst(pattern regexp.Regexp, conf peer.ExpandingRing) (name
 		conf.Initial, conf.Factor, conf.Retry, conf.Timeout)
 
 	// First check if it has everything in local
-	_, err = n.FindFullTagFromLocal(pattern)
-	// Find all neighbors of this node
-	//neighbors := n.routingtable.FindNeighbor(n.conf.Socket.GetAddress())
-	//shuffleNeighbors, budgetPerNeighbor := n.FindBudgetPerNeighbor(neighbors, conf.Initial)
-	//
+	foundName, err := n.FindFullTagFromLocal(pattern)
+	if foundName != "" {
+		// this node has everything in local
+		return foundName, nil
+	} else {
+		// need to check the if the neighbors have data
+
+		// Find all neighbors of this node
+		neighbors := n.routingtable.FindNeighbor(n.conf.Socket.GetAddress())
+		budget := conf.Initial
+		for i := 0; i < int(conf.Retry); i++ {
+
+			shuffleNeighbors, budgetPerNeighbor := n.FindBudgetPerNeighbor(neighbors, budget)
+			if len(shuffleNeighbors) != 0 {
+				switch budgetPerNeighbor {
+				case 0:
+					for j := 0; j < int(budget); j++ {
+						requestID := xid.New().String()
+						log.Info().Msgf("[SearchAll] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[j])
+						_ = n.SendSearchRequest(pattern.String(), uint(1), shuffleNeighbors[j], requestID, n.conf.Socket.GetAddress())
+
+						// Error handling?
+						_ = n.WaitForSearchReply(conf.Timeout, requestID)
+
+					}
+				default:
+					for j := 0; j < len(shuffleNeighbors); j++ {
+						if j == len(shuffleNeighbors)-1 {
+							// last one -> budget should be the rest
+							usedBudget := uint(len(shuffleNeighbors)-1) * budgetPerNeighbor
+							budgetPerNeighbor = budget - usedBudget
+						}
+						requestID := xid.New().String()
+						log.Info().Msgf("[SearchAll] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[j])
+						_ = n.SendSearchRequest(pattern.String(), budgetPerNeighbor, shuffleNeighbors[j], requestID, n.conf.Socket.GetAddress())
+						// Error handling?
+						_ = n.WaitForSearchReply(conf.Timeout, requestID)
+					}
+
+				}
+
+			} else {
+				// no neighbor -> only return the node's matching names
+				// budgetPerNeighbor = -1
+			}
+		}
+
+		//
+	}
 
 	return "", nil
 }

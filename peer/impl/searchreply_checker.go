@@ -28,3 +28,23 @@ func (src *searchReplyChecker) FindSearchReplyEntry(key string) chan []string {
 
 	return src.realSearchReplyChecker[key]
 }
+
+func (src *searchReplyChecker) DeleteSearchReplyChecker(key string) {
+	src.Lock()
+	defer src.Unlock()
+
+	channel, ok := src.realSearchReplyChecker[key]
+	if !ok {
+		return
+	}
+
+	delete(src.realSearchReplyChecker, key)
+
+	// Drain item
+	for len(channel) > 0 {
+		<-channel
+	}
+
+	close(channel)
+
+}
