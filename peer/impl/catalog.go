@@ -20,9 +20,10 @@ func (c *safeCatalog) FindCatalogEntry(key string) []string {
 			result = append(result, p)
 		}
 		return result
-	} else {
-		return nil
 	}
+
+	return nil
+
 }
 
 func (c *safeCatalog) UpdateCatalogWithMutex(key string, peer string) {

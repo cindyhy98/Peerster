@@ -198,7 +198,7 @@ func (n *node) ForwardSearchRequest(searchReq *types.SearchRequestMessage, neigh
 	//neighbors := n.routingtable.FindNeighbor(n.conf.Socket.GetAddress())
 
 	remainingBudget := searchReq.Budget - 1
-	log.Info().Msgf("[ForwardSearchRequest] Remaining budget = %v, NumberOfNeighbors = %v", remainingBudget, len(neighbors))
+
 	shuffleNeighbors, budgetPerNeighbor := n.FindBudgetPerNeighbor(neighbors, remainingBudget)
 
 	if len(shuffleNeighbors) != 0 && remainingBudget != 0 {
@@ -220,7 +220,8 @@ func (n *node) ForwardSearchRequest(searchReq *types.SearchRequestMessage, neigh
 				}
 
 				log.Info().Msgf("[ForwardSearchRequest] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[i])
-				_ = n.SendSearchRequest(searchReq.Pattern, budgetPerNeighbor, shuffleNeighbors[i], searchReq.RequestID, searchReq.Origin)
+				_ = n.SendSearchRequest(searchReq.Pattern, budgetPerNeighbor,
+					shuffleNeighbors[i], searchReq.RequestID, searchReq.Origin)
 
 			}
 
@@ -499,9 +500,8 @@ func (n *node) ExecDataReplyMessage(msg types.Message, pkt transport.Packet) err
 
 		log.Info().Msgf("[ExecDataReplyMessage] store chunk of key %v in local storage", msgDataReply.Key)
 		return nil
-	} else {
-		return errors.New("entry not found")
 	}
+	return errors.New("entry not found")
 
 }
 
@@ -536,7 +536,8 @@ func (n *node) ExecSearchRequestMessage(msg types.Message, pkt transport.Packet)
 			Header: &header,
 			Msg:    &transMsg,
 		}
-		log.Info().Msgf("[ExecSearchRequestMessage] [%v] Forwarded SearchReply => [%v] ", n.conf.Socket.GetAddress(), pkt.Header.Source)
+		//log.Info().Msgf("[ExecSearchRequestMessage] [%v] Forwarded SearchReply => [%v] ",
+		//	n.conf.Socket.GetAddress(), pkt.Header.Source)
 		err := n.conf.Socket.Send(pkt.Header.Source, pktNew, 0)
 		if err != nil {
 			log.Error().Msgf("[ExecSearchRequestMessage Error] %v", err)
@@ -545,7 +546,8 @@ func (n *node) ExecSearchRequestMessage(msg types.Message, pkt transport.Packet)
 	} else {
 		// this is the original searchReq
 
-		log.Info().Msgf("[ExecSearchRequestMessage] [%v] Original SearchReply => [%v] ", n.conf.Socket.GetAddress(), pkt.Header.Source)
+		//log.Info().Msgf("[ExecSearchRequestMessage] [%v] Original SearchReply => [%v] ",
+		//	n.conf.Socket.GetAddress(), pkt.Header.Source)
 		err := n.Unicast(pkt.Header.Source, transMsg)
 
 		if err != nil {
@@ -590,9 +592,6 @@ func (n *node) ExecSearchReplyMessage(msg types.Message, pkt transport.Packet) e
 		}
 
 		n.searchReply.UpdateSearchReplyEntry(msgSearchReply.RequestID, msgSearchReply.Responses)
-
-	} else {
-
 	}
 
 	return nil
