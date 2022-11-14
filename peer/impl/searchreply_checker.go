@@ -1,20 +1,23 @@
 package impl
 
-import "sync"
+import (
+	"go.dedis.ch/cs438/types"
+	"sync"
+)
 
 type searchReplyChecker struct {
 	*sync.Mutex
-	realSearchReplyChecker map[string]chan []string
+	realSearchReplyChecker map[string]chan []types.FileInfo
 }
 
 func (src *searchReplyChecker) InitSearchReplyChecker(key string) {
 	src.Lock()
 	defer src.Unlock()
 
-	src.realSearchReplyChecker[key] = make(chan []string)
+	src.realSearchReplyChecker[key] = make(chan []types.FileInfo)
 }
 
-func (src *searchReplyChecker) UpdateSearchReplyEntry(key string, data []string) {
+func (src *searchReplyChecker) UpdateSearchReplyEntry(key string, data []types.FileInfo) {
 	src.Lock()
 	defer src.Unlock()
 
@@ -22,7 +25,7 @@ func (src *searchReplyChecker) UpdateSearchReplyEntry(key string, data []string)
 	src.realSearchReplyChecker[key] <- data
 }
 
-func (src *searchReplyChecker) FindSearchReplyEntry(key string) chan []string {
+func (src *searchReplyChecker) FindSearchReplyEntry(key string) chan []types.FileInfo {
 	src.Lock()
 	defer src.Unlock()
 

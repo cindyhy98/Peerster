@@ -59,7 +59,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 
 	var newSearchReplyChecker searchReplyChecker
 	newSearchReplyChecker.Mutex = &sync.Mutex{}
-	newSearchReplyChecker.realSearchReplyChecker = make(map[string]chan []string)
+	newSearchReplyChecker.realSearchReplyChecker = make(map[string]chan []types.FileInfo)
 
 	var newTag safeTag
 	newTag.Mutex = &sync.Mutex{}

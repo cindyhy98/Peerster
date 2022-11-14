@@ -568,10 +568,10 @@ func (n *node) ExecSearchReplyMessage(msg types.Message, pkt transport.Packet) e
 
 	// store naming in local
 	if msgSearchReply.Responses != nil {
-		allFileName := make([]string, 0)
+		//allFileName := make([]string, 0)
 		for _, file := range msgSearchReply.Responses {
 
-			allFileName = append(allFileName, file.Name)
+			//allFileName = append(allFileName, file.Name)
 			// Update the naming store
 			log.Info().Msgf("[ExecSearchReplyMessage] Store %v:%v in NamingStore", file.Name, file.Metahash)
 			n.conf.Storage.GetNamingStore().Set(file.Name, []byte(file.Metahash))
@@ -589,7 +589,7 @@ func (n *node) ExecSearchReplyMessage(msg types.Message, pkt transport.Packet) e
 			//log.Info().Msgf("[ExecSearchReplyMessage] Updated catalog = %v", n.GetCatalog())
 
 		}
-		n.searchReply.UpdateSearchReplyEntry(msgSearchReply.RequestID, allFileName)
+		n.searchReply.UpdateSearchReplyEntry(msgSearchReply.RequestID, msgSearchReply.Responses)
 
 	} else {
 
