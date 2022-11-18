@@ -438,10 +438,19 @@ func (n *node) UpdateCatalog(key string, peer string) {
 func (n *node) Tag(name string, mh string) error {
 	// Tag creates a mapping between a (file)name and a metahash
 	log.Info().Msgf("[Tag] Store %v:%v in NamingStore", name, mh)
-
-	// maybe don't need this
-	n.tag.UpdateTagRecord(name, mh)
 	n.conf.Storage.GetNamingStore().Set(name, []byte(mh))
+
+	// [HW3] once a file has been named in the system, all peers see it under the same name.
+
+	// If total peer is <= 1 then there is no use of Paxos/TLC/Blockchain.
+	if n.conf.TotalPeers <= 1 {
+		log.Info().Msgf("[Tag] No Peers\n")
+		return nil
+	} else {
+		log.Info().Msgf("[Tag] Total Peer = %v\n", n.conf.TotalPeers)
+		// Implement Paxos
+
+	}
 
 	// Question: when will return error??
 	return nil
@@ -519,9 +528,6 @@ func (n *node) SearchFirst(pattern regexp.Regexp, conf peer.ExpandingRing) (name
 	// SearchReplyMessages received. Returns an empty string if nothing was
 	// found.
 
-	log.Info().Msgf("[SearchFirst] conf initial = %v, factor = %v, retry = %v, timeout = %v",
-		conf.Initial, conf.Factor, conf.Retry, conf.Timeout)
-
 	// First check if it has everything in local
 	if foundName, _ := n.FindFullTagFromLocal(pattern); foundName != "" {
 		return foundName, nil
@@ -544,57 +550,6 @@ func (n *node) SearchFirst(pattern regexp.Regexp, conf peer.ExpandingRing) (name
 			if foundNameFromPeer != "" {
 				return foundNameFromPeer, nil
 			}
-			/*
-				switch budgetPerNeighbor {
-				case 0:
-					for j := 0; j < int(budget); j++ {
-
-						requestID := xid.New().String()
-						channel := n.searchReply.InitSearchReplyChecker(requestID)
-						log.Info().Msgf("[SearchFirst] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(), shuffleNeighbors[j])
-						_ = n.SendSearchRequest(pattern.String(), uint(1), shuffleNeighbors[j], requestID, n.conf.Socket.GetAddress())
-
-						// Error handling?
-						receivedData, _ := n.WaitForSearchReply(conf.Timeout, channel)
-						n.searchReply.DeleteSearchReplyChecker(requestID)
-
-						//receivedData := n.SearchFirstFromNeighbors(pattern, uint(1), shuffleNeighbors[j], conf.Timeout)
-
-						foundNameFromPeer, isAllChunkAvaliable := n.CheckIfAllChunkAvailable(receivedData)
-
-						if foundNameFromPeer != "" && isAllChunkAvaliable {
-							return foundNameFromPeer, nil
-						}
-					}
-				default:
-					for j := 0; j < len(shuffleNeighbors); j++ {
-						if j == len(shuffleNeighbors)-1 {
-							// last one -> budget should be the rest
-							usedBudget := uint(len(shuffleNeighbors)-1) * budgetPerNeighbor
-							budgetPerNeighbor = budget - usedBudget
-						}
-
-						requestID := xid.New().String()
-						channel := n.searchReply.InitSearchReplyChecker(requestID)
-						log.Info().Msgf("[SearchFirst] [%v] searchReq => [%v]", n.conf.Socket.GetAddress(),
-							shuffleNeighbors[j])
-						_ = n.SendSearchRequest(pattern.String(), budgetPerNeighbor, shuffleNeighbors[j],
-							requestID, n.conf.Socket.GetAddress())
-						// Error handling?
-						receivedData, _ := n.WaitForSearchReply(conf.Timeout, channel)
-						n.searchReply.DeleteSearchReplyChecker(requestID)
-						//receivedData := n.SearchFirstFromNeighbors(pattern, budgetPerNeighbor,
-						//	shuffleNeighbors[j], conf.Timeout)
-
-						foundNameFromPeer, isAllChunkAvaliable := n.CheckIfAllChunkAvailable(receivedData)
-
-						if foundNameFromPeer != "" && isAllChunkAvaliable {
-							return foundNameFromPeer, nil
-						}
-					}
-
-				}
-			*/
 		}
 		// no neighbor -> only return the node's matching names
 

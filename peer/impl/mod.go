@@ -61,10 +61,6 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newSearchReplyChecker.Mutex = &sync.Mutex{}
 	newSearchReplyChecker.realSearchReplyChecker = make(map[string]chan []types.FileInfo)
 
-	var newTag safeTag
-	newTag.Mutex = &sync.Mutex{}
-	newTag.realTag = make(map[string]string)
-
 	newNode := node{
 		conf:            conf,
 		stopChannel:     make(chan bool, 1),
@@ -76,8 +72,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 		sentRumor:       newSentRumor,
 		catalog:         newCatalog,
 		dataReply:       newDataReplyChecker,
-		searchReply:     newSearchReplyChecker,
-		tag:             newTag}
+		searchReply:     newSearchReplyChecker}
 	//tag:             newTag}
 
 	// Register the handler
@@ -118,7 +113,6 @@ type node struct {
 	lastStatus   safeStatus
 	sentRumor    safeRumorMap
 	catalog      safeCatalog
-	tag          safeTag
 
 	dataReply   dataReplyChecker
 	searchReply searchReplyChecker
