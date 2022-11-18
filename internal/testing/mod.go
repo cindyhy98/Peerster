@@ -753,3 +753,13 @@ func GetSocket(t *testing.T, transp transport.Transport, addr string) transport.
 type Terminable interface {
 	Terminate() error
 }
+
+// MustDecode decodes an hex string and panic if it fails
+func MustDecode(hexStr string) []byte {
+	buff, err := hex.DecodeString(hexStr)
+	if err != nil {
+		panic("failed to decode: " + err.Error())
+	}
+
+	return buff
+}

@@ -661,20 +661,21 @@ func Test_HW3_TLC_Move_Step_Not_Enough(t *testing.T) {
 
 	// send a first block, corresponding to the correct step
 
-	blockHash := []byte{0xaa, 0xbb, 0xcc, 0xdd}
-	previousHash := []byte{0x11, 0x22, 0x33, 0x44}
+	// computed by hand
+	blockHash := "9efc06df7e54b580ebb0e7d7e52cdf05773cf5165c2a2d1a52cdc9ab6fd442e0"
+	previousHash := [32]byte{}
 
 	tlc := types.TLCMessage{
 		Step: 0,
 		Block: types.BlockchainBlock{
 			Index: 0,
-			Hash:  blockHash,
+			Hash:  z.MustDecode(blockHash),
 			Value: types.PaxosValue{
 				UniqID:   "xxx",
 				Filename: "a",
 				Metahash: "b",
 			},
-			PrevHash: previousHash,
+			PrevHash: previousHash[:],
 		},
 	}
 
@@ -736,20 +737,21 @@ func Test_HW3_TLC_Move_Step_OK(t *testing.T) {
 
 	// send two TLC messages for the same step
 
-	blockHash := []byte{0xaa, 0xbb, 0xcc, 0xdd}
-	previousHash := []byte{0x11, 0x22, 0x33, 0x44}
+	// computed by hand
+	blockHash := "9efc06df7e54b580ebb0e7d7e52cdf05773cf5165c2a2d1a52cdc9ab6fd442e0"
+	previousHash := [32]byte{}
 
 	tlc := types.TLCMessage{
 		Step: 0,
 		Block: types.BlockchainBlock{
 			Index: 0,
-			Hash:  blockHash,
+			Hash:  z.MustDecode(blockHash),
 			Value: types.PaxosValue{
 				UniqID:   "xxx",
 				Filename: "a",
 				Metahash: "b",
 			},
-			PrevHash: previousHash,
+			PrevHash: previousHash[:],
 		},
 	}
 
@@ -779,7 +781,7 @@ func Test_HW3_TLC_Move_Step_OK(t *testing.T) {
 	// one element is the last block hash, the other is the block
 	require.Equal(t, 2, store.Len())
 
-	blockBuf := store.Get(hex.EncodeToString(blockHash))
+	blockBuf := store.Get(blockHash)
 
 	var block types.BlockchainBlock
 	err = block.Unmarshal(blockBuf)
@@ -789,7 +791,7 @@ func Test_HW3_TLC_Move_Step_OK(t *testing.T) {
 
 	// > node1 must have the block hash in the LasBlockKey store
 
-	require.Equal(t, blockHash, store.Get(storage.LastBlockKey))
+	require.Equal(t, z.MustDecode(blockHash), store.Get(storage.LastBlockKey))
 
 	// > node1 must have the name in its name store
 
@@ -813,29 +815,61 @@ func Test_HW3_TLC_Move_Step_Catchup(t *testing.T) {
 
 	node1.AddPeer(socketX.GetAddress())
 
-	// send for step 2
+	// computed by hand
+	blockHash0 := "9efc06df7e54b580ebb0e7d7e52cdf05773cf5165c2a2d1a52cdc9ab6fd442e0"
+	previousHash0 := [32]byte{}
 
-	blockHash := make([]byte, 32)
-	blockHash[0] = 3
-
-	previousHash := make([]byte, 32)
-	previousHash[0] = 2
-
-	tlc := types.TLCMessage{
-		Step: 2,
+	tlc0 := types.TLCMessage{
+		Step: 0,
 		Block: types.BlockchainBlock{
 			Index: 0,
-			Hash:  blockHash,
+			Hash:  z.MustDecode(blockHash0),
 			Value: types.PaxosValue{
 				UniqID:   "xxx",
-				Filename: "c",
-				Metahash: "1",
+				Filename: "a",
+				Metahash: "b",
 			},
-			PrevHash: previousHash,
+			PrevHash: previousHash0[:],
 		},
 	}
 
-	transpMsg, err := node1.GetRegistry().MarshalMessage(&tlc)
+	// computed by hand
+	blockHash1 := "85a4ef7563349ee08c1ce7b669b1cff5afad5f8f47e6c1be307498e981efbfab"
+
+	tlc1 := types.TLCMessage{
+		Step: 1,
+		Block: types.BlockchainBlock{
+			Index: 1,
+			Hash:  z.MustDecode(blockHash1),
+			Value: types.PaxosValue{
+				UniqID:   "yyy",
+				Filename: "e",
+				Metahash: "f",
+			},
+			PrevHash: z.MustDecode(blockHash0),
+		},
+	}
+
+	// computed by hand
+	blockHash2 := "4db12a08ff475592180e74b569fd936afef15eeb682bfcc203cb8eb03b8a52f5"
+
+	tlc2 := types.TLCMessage{
+		Step: 2,
+		Block: types.BlockchainBlock{
+			Index: 2,
+			Hash:  z.MustDecode(blockHash2),
+			Value: types.PaxosValue{
+				UniqID:   "zzz",
+				Filename: "g",
+				Metahash: "h",
+			},
+			PrevHash: z.MustDecode(blockHash1),
+		},
+	}
+
+	// send for step 2
+
+	transpMsg, err := node1.GetRegistry().MarshalMessage(&tlc2)
 	require.NoError(t, err)
 
 	header := transport.NewHeader(socketX.GetAddress(), socketX.GetAddress(), node1.GetAddr(), 0)
@@ -852,17 +886,7 @@ func Test_HW3_TLC_Move_Step_Catchup(t *testing.T) {
 
 	// Send for step 1
 
-	tlc.Step = 1
-
-	blockHash[0] = 2
-	previousHash[0] = 1
-
-	tlc.Block.Hash = blockHash
-	tlc.Block.PrevHash = previousHash
-
-	tlc.Block.Value.Filename = "b"
-
-	transpMsg, err = node1.GetRegistry().MarshalMessage(&tlc)
+	transpMsg, err = node1.GetRegistry().MarshalMessage(&tlc1)
 	require.NoError(t, err)
 
 	header = transport.NewHeader(socketX.GetAddress(), socketX.GetAddress(), node1.GetAddr(), 0)
@@ -884,17 +908,7 @@ func Test_HW3_TLC_Move_Step_Catchup(t *testing.T) {
 
 	// adding the expected TLC message. Peer must then add block 0, 1, and 2.
 
-	tlc.Step = 0
-
-	blockHash[0] = 1
-	previousHash[0] = 0
-
-	tlc.Block.Hash = blockHash
-	tlc.Block.PrevHash = previousHash
-
-	tlc.Block.Value.Filename = "a"
-
-	transpMsg, err = node1.GetRegistry().MarshalMessage(&tlc)
+	transpMsg, err = node1.GetRegistry().MarshalMessage(&tlc0)
 	require.NoError(t, err)
 
 	header = transport.NewHeader(socketX.GetAddress(), socketX.GetAddress(), node1.GetAddr(), 0)
@@ -913,25 +927,24 @@ func Test_HW3_TLC_Move_Step_Catchup(t *testing.T) {
 
 	// 3 blocks + the last block key
 	require.Equal(t, 4, store.Len())
-	blockBuf := store.Get(hex.EncodeToString(blockHash))
+	blockBuf := store.Get(blockHash2)
 
 	var block types.BlockchainBlock
 	err = block.Unmarshal(blockBuf)
 	require.NoError(t, err)
 
-	require.Equal(t, tlc.Block, block)
+	require.Equal(t, tlc2.Block, block)
 
 	// > node1 must have the block hash in the LasBlockKey store
 
-	blockHash[0] = 3
-	require.Equal(t, blockHash, store.Get(storage.LastBlockKey))
+	require.Equal(t, z.MustDecode(blockHash2), store.Get(storage.LastBlockKey))
 
 	// > node1 must have 3 names in its name store
 
 	require.Equal(t, 3, node1.GetStorage().GetNamingStore().Len())
-	require.Equal(t, []byte("1"), node1.GetStorage().GetNamingStore().Get("a"))
-	require.Equal(t, []byte("1"), node1.GetStorage().GetNamingStore().Get("b"))
-	require.Equal(t, []byte("1"), node1.GetStorage().GetNamingStore().Get("c"))
+	require.Equal(t, []byte("b"), node1.GetStorage().GetNamingStore().Get("a"))
+	require.Equal(t, []byte("f"), node1.GetStorage().GetNamingStore().Get("e"))
+	require.Equal(t, []byte("h"), node1.GetStorage().GetNamingStore().Get("g"))
 }
 
 // 3-14
