@@ -596,7 +596,3 @@ func (n *node) ExecSearchReplyMessage(msg types.Message, pkt transport.Packet) e
 
 	return nil
 }
-
-//func (n *node) ExecFileInfo(msg types.Message, pkt transport.Packet) error {
-//	return nil
-//}

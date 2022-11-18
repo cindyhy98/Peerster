@@ -61,32 +61,49 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newSearchReplyChecker.Mutex = &sync.Mutex{}
 	newSearchReplyChecker.realSearchReplyChecker = make(map[string]chan []types.FileInfo)
 
+	var newPaxosInstance safePaxosInstance
+	newPaxosInstance.Mutex = &sync.Mutex{}
+	newPaxosInstance.maxID = 0
+	newPaxosInstance.AcceptedID = 0
+	newPaxosInstance.AcceptedValue = nil
+
 	newNode := node{
-		conf:            conf,
-		stopChannel:     make(chan bool, 1),
-		tickerAntiEn:    newTickerAntiEn,
-		tickerHeartBeat: newTickerHeartBeat,
-		ackRecord:       newAckChecker,
-		routingtable:    newRoutingtable,
-		lastStatus:      newStatus,
-		sentRumor:       newSentRumor,
-		catalog:         newCatalog,
-		dataReply:       newDataReplyChecker,
-		searchReply:     newSearchReplyChecker}
-	//tag:             newTag}
+		conf:                conf,
+		stopChannel:         make(chan bool, 1),
+		tickerAntiEn:        newTickerAntiEn,
+		tickerHeartBeat:     newTickerHeartBeat,
+		ackRecord:           newAckChecker,
+		routingtable:        newRoutingtable,
+		lastStatus:          newStatus,
+		sentRumor:           newSentRumor,
+		catalog:             newCatalog,
+		dataReply:           newDataReplyChecker,
+		searchReply:         newSearchReplyChecker,
+		currentLogicalClock: uint(0),
+		paxosInstance:       newPaxosInstance}
 
 	// Register the handler
+	/* HW0 */
 	conf.MessageRegistry.RegisterMessageCallback(types.ChatMessage{}, newNode.ExecChatMessage)
+
+	/* HW1 */
 	conf.MessageRegistry.RegisterMessageCallback(types.RumorsMessage{}, newNode.ExecRumorsMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.AckMessage{}, newNode.ExecAckMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.StatusMessage{}, newNode.ExecStatusMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.EmptyMessage{}, newNode.ExecEmptyMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.PrivateMessage{}, newNode.ExecPrivateMessage)
+
+	/* HW2 */
 	conf.MessageRegistry.RegisterMessageCallback(types.DataRequestMessage{}, newNode.ExecDataRequestMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.DataReplyMessage{}, newNode.ExecDataReplyMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.SearchRequestMessage{}, newNode.ExecSearchRequestMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.SearchReplyMessage{}, newNode.ExecSearchReplyMessage)
-	//conf.MessageRegistry.RegisterMessageCallback(types.FileInfo{}, newNode.ExecFileInfo)
+
+	/* HW3 */
+	conf.MessageRegistry.RegisterMessageCallback(types.PaxosPrepareMessage{}, newNode.ExecPaxosPrepareMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.PaxosPromiseMessage{}, newNode.ExecPaxosPromiseMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.PaxosProposeMessage{}, newNode.ExecPaxosProposeMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.PaxosAcceptMessage{}, newNode.ExecPaxosAcceptMessage)
 
 	return &newNode
 }
@@ -116,6 +133,9 @@ type node struct {
 
 	dataReply   dataReplyChecker
 	searchReply searchReplyChecker
+
+	currentLogicalClock uint
+	paxosInstance       safePaxosInstance
 }
 
 func checkTimeoutError(err error, timeout time.Duration) error {
