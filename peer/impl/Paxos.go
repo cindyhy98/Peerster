@@ -28,7 +28,25 @@ func (n *node) CheckPaxosPrepareMessage(msgPaxosPrepare *types.PaxosPrepareMessa
 		shouldIgnore = true
 		log.Info().Msgf("[CheckPaxosPrepareMessage] Ignore this message with wrong ID %v", msgPaxosPrepare.ID)
 	} else {
+		log.Info().Msgf("[CheckPaxosPrepareMessage] Update maxID to %v", msgPaxosPrepare.ID)
 		n.paxosInstance.maxID = msgPaxosPrepare.ID
+	}
+
+	return shouldIgnore
+}
+
+func (n *node) CheckPaxosProposeMessage(msgPaxosPropose *types.PaxosProposeMessage) bool {
+	shouldIgnore := false
+	// If the step != 0 -> Ignore
+	if msgPaxosPropose.Step != n.currentLogicalClock {
+		shouldIgnore = true
+		log.Info().Msgf("[CheckPaxosPrepareMessage] Ignore this message with step %v", msgPaxosPropose.Step)
+
+	}
+
+	if msgPaxosPropose.ID != n.paxosInstance.maxID {
+		shouldIgnore = true
+		log.Info().Msgf("[CheckPaxosPrepareMessage] Ignore this message with wrong ID %v", msgPaxosPropose.ID)
 	}
 
 	return shouldIgnore
@@ -85,12 +103,29 @@ func (n *node) ExecPaxosPromiseMessage(msg types.Message, pkt transport.Packet) 
 }
 
 func (n *node) ExecPaxosProposeMessage(msg types.Message, pkt transport.Packet) error {
-	msgPaxosPropose, ok := msg.(*types.PaxosPromiseMessage)
+	msgPaxosPropose, ok := msg.(*types.PaxosProposeMessage)
 	if !ok {
 		return xerrors.Errorf("wrong type: %T", msg)
 	}
 
 	log.Info().Msgf("[ExecPaxosProposeMessage] %v ", msgPaxosPropose)
+	if n.CheckPaxosProposeMessage(msgPaxosPropose) {
+		// Ignore
+	} else {
+		// Question: should I change it here?
+		n.paxosInstance.AcceptedID = msgPaxosPropose.ID
+		n.paxosInstance.AcceptedValue = &msgPaxosPropose.Value
+
+		newPaxosAcceptMessage := types.PaxosAcceptMessage{
+			Step:  msgPaxosPropose.Step,
+			ID:    msgPaxosPropose.ID,
+			Value: msgPaxosPropose.Value,
+		}
+		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosAcceptMessage)
+		err := n.Broadcast(transMsg)
+		return err
+	}
+
 	return nil
 }
 
