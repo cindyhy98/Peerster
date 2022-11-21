@@ -434,7 +434,7 @@ func (n *node) ExecPrivateMessage(msg types.Message, pkt transport.Packet) error
 		return xerrors.Errorf("wrong type: %T", msg)
 	}
 
-	log.Info().Msgf("[ExecPrivateMessage] %v ", msgPrivate)
+	//log.Info().Msgf("[ExecPrivateMessage] %v ", msgPrivate)
 	socketAddr := n.conf.Socket.GetAddress()
 	isRecipient := false
 
@@ -448,6 +448,7 @@ func (n *node) ExecPrivateMessage(msg types.Message, pkt transport.Packet) error
 	case true:
 
 		pktPrivate := transport.Packet{Header: pkt.Header, Msg: msgPrivate.Msg}
+		log.Info().Msgf("[ExecPrivateMessage] process private message (%v => %v)", pkt.Header.Source, pkt.Header.Destination)
 		_ = n.conf.MessageRegistry.ProcessPacket(pktPrivate)
 	case false:
 		// do nothing
@@ -593,6 +594,57 @@ func (n *node) ExecSearchReplyMessage(msg types.Message, pkt transport.Packet) e
 
 		n.searchReply.UpdateSearchReplyEntry(msgSearchReply.RequestID, msgSearchReply.Responses)
 	}
+
+	return nil
+}
+
+func (n *node) ExecPaxosPrepareMessage(msg types.Message, pkt transport.Packet) error {
+	msgPaxosPrepare, ok := msg.(*types.PaxosPrepareMessage)
+	if !ok {
+		return xerrors.Errorf("wrong type: %T", msg)
+	}
+	log.Info().Msgf("[%v] <= Paxos Prepare [%v]", n.conf.Socket.GetAddress(), pkt.Header.Source)
+
+	key := n.ComputePaxosChannelKey("prepare", msgPaxosPrepare.ID)
+	n.paxosMsgChannel.SendToPaxosHandler(key, msg)
+
+	return nil
+}
+
+func (n *node) ExecPaxosPromiseMessage(msg types.Message, pkt transport.Packet) error {
+	msgPaxosPromise, ok := msg.(*types.PaxosPromiseMessage)
+	if !ok {
+		return xerrors.Errorf("wrong type: %T", msg)
+	}
+	log.Info().Msgf("[%v] <= Paxos Promise [%v]", n.conf.Socket.GetAddress(), pkt.Header.Source)
+
+	key := n.ComputePaxosChannelKey("promise", msgPaxosPromise.ID)
+	n.paxosMsgChannel.SendToPaxosHandler(key, msg)
+
+	return nil
+}
+
+func (n *node) ExecPaxosProposeMessage(msg types.Message, pkt transport.Packet) error {
+	msgPaxosPropose, ok := msg.(*types.PaxosProposeMessage)
+	if !ok {
+		return xerrors.Errorf("wrong type: %T", msg)
+	}
+	log.Info().Msgf("[%v] <= Paxos Propose  [%v]", n.conf.Socket.GetAddress(), pkt.Header.Source)
+	key := n.ComputePaxosChannelKey("propose", msgPaxosPropose.ID)
+	n.paxosMsgChannel.SendToPaxosHandler(key, msg)
+
+	return nil
+}
+
+func (n *node) ExecPaxosAcceptMessage(msg types.Message, pkt transport.Packet) error {
+	msgPaxosAccept, ok := msg.(*types.PaxosAcceptMessage)
+	if !ok {
+		return xerrors.Errorf("wrong type: %T", msg)
+	}
+
+	log.Info().Msgf("[%v] <= Paxos Accept [%v]", n.conf.Socket.GetAddress(), pkt.Header.Source)
+	key := n.ComputePaxosChannelKey("accept", msgPaxosAccept.ID)
+	n.paxosMsgChannel.SendToPaxosHandler(key, msg)
 
 	return nil
 }

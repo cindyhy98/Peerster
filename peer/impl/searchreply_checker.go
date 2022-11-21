@@ -1,7 +1,6 @@
 package impl
 
 import (
-	"github.com/rs/zerolog/log"
 	"go.dedis.ch/cs438/types"
 	"sync"
 )
@@ -23,10 +22,7 @@ func (src *searchReplyChecker) UpdateSearchReplyEntry(key string, data []types.F
 	src.Lock()
 	defer src.Unlock()
 
-	// Question: Is the functionality correct?
-	log.Info().Msgf("[UpdateSearchReplyEntry] Before writing to channel")
 	src.realSearchReplyChecker[key] <- data
-	log.Info().Msgf("[UpdateSearchReplyEntry] After writing to channel")
 }
 
 //func (src *searchReplyChecker) FindSearchReplyEntry(key string) chan []types.FileInfo {

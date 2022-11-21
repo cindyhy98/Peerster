@@ -61,26 +61,33 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newSearchReplyChecker.Mutex = &sync.Mutex{}
 	newSearchReplyChecker.realSearchReplyChecker = make(map[string]chan []types.FileInfo)
 
+	var newPaxosMsgChannel safePaxosMsgChannel
+	newPaxosMsgChannel.Mutex = &sync.Mutex{}
+	newPaxosMsgChannel.realMsgChannel = make(map[string]chan types.Message)
+
 	var newPaxosInstance safePaxosInstance
 	newPaxosInstance.Mutex = &sync.Mutex{}
 	newPaxosInstance.maxID = 0
-	newPaxosInstance.AcceptedID = 0
-	newPaxosInstance.AcceptedValue = nil
+	newPaxosInstance.currentLogicalClock = 0
+	newPaxosInstance.phase = 0
+	newPaxosInstance.promises = make([]*types.PaxosPromiseMessage, 0)
+	newPaxosInstance.acceptedID = 0
+	newPaxosInstance.acceptedValue = nil
 
 	newNode := node{
-		conf:                conf,
-		stopChannel:         make(chan bool, 1),
-		tickerAntiEn:        newTickerAntiEn,
-		tickerHeartBeat:     newTickerHeartBeat,
-		ackRecord:           newAckChecker,
-		routingtable:        newRoutingtable,
-		lastStatus:          newStatus,
-		sentRumor:           newSentRumor,
-		catalog:             newCatalog,
-		dataReply:           newDataReplyChecker,
-		searchReply:         newSearchReplyChecker,
-		currentLogicalClock: uint(0),
-		paxosInstance:       newPaxosInstance}
+		conf:            conf,
+		stopChannel:     make(chan bool, 1),
+		tickerAntiEn:    newTickerAntiEn,
+		tickerHeartBeat: newTickerHeartBeat,
+		ackRecord:       newAckChecker,
+		routingtable:    newRoutingtable,
+		lastStatus:      newStatus,
+		sentRumor:       newSentRumor,
+		catalog:         newCatalog,
+		dataReply:       newDataReplyChecker,
+		searchReply:     newSearchReplyChecker,
+		paxosMsgChannel: newPaxosMsgChannel,
+		paxosInstance:   newPaxosInstance}
 
 	// Register the handler
 	/* HW0 */
@@ -134,8 +141,8 @@ type node struct {
 	dataReply   dataReplyChecker
 	searchReply searchReplyChecker
 
-	currentLogicalClock uint
-	paxosInstance       safePaxosInstance
+	paxosMsgChannel safePaxosMsgChannel
+	paxosInstance   safePaxosInstance
 }
 
 func checkTimeoutError(err error, timeout time.Duration) error {
