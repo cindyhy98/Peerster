@@ -18,6 +18,15 @@ func (pmc *safePaxosMsgChannel) InitPaxosMsgChannel(key string) chan types.Messa
 	return pmc.realMsgChannel[key]
 }
 
+func (pmc *safePaxosMsgChannel) GetPaxosMsgChannel(key string) chan types.Message {
+	pmc.Lock()
+	defer pmc.Unlock()
+
+	// this channel has already been init
+	//pmc.realMsgChannel[key] = make(chan types.Message)
+	return pmc.realMsgChannel[key]
+}
+
 func (pmc *safePaxosMsgChannel) SendToPaxosHandler(key string, data types.Message) {
 	pmc.Lock()
 	pmc.Unlock()
