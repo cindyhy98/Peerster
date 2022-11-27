@@ -245,7 +245,7 @@ func (n *node) CheckPaxosPrepareMessage(msgPaxosPrepare *types.PaxosPrepareMessa
 		shouldIgnore = true
 		log.Info().Msgf("Ignore a prepare message as Paxos ID (%v) isn't greater than the maxID (%v)", msgPaxosPrepare.ID, n.paxosInstance.maxID)
 	} else {
-		log.Info().Msgf("Update maxID to %v in prepare phase", msgPaxosPrepare.ID)
+		log.Info().Msgf("[CheckPaxosPrepareMessage] Update maxID to %v in prepare phase", msgPaxosPrepare.ID)
 		n.paxosInstance.maxID = msgPaxosPrepare.ID
 	}
 
@@ -262,11 +262,11 @@ func (n *node) CheckPaxosPromiseMessage(msgPaxosPromise *types.PaxosPromiseMessa
 
 	}
 
-	// Ignore messages if the proposer is not in Paxos phase 1
-	if n.paxosInstance.phase != 1 {
-		shouldIgnore = true
-		log.Info().Msgf("Ignore a promise message as Paxos is in Phase [%v]", n.paxosInstance.phase)
-	}
+	//// Ignore messages if the proposer is not in Paxos phase 1
+	//if n.paxosInstance.currentPhase != 1 {
+	//	shouldIgnore = true
+	//	log.Info().Msgf("Ignore a promise message as Paxos is in Phase [%v]", n.paxosInstance.currentPhase)
+	//}
 
 	return shouldIgnore
 }
@@ -298,67 +298,61 @@ func (n *node) CheckPaxosAcceptMessage(msgPaxosAccept *types.PaxosAcceptMessage)
 
 	}
 
-	// Ignore messages if the proposer is not in Paxos phase 1
-	if n.paxosInstance.phase != 2 {
-		shouldIgnore = true
-		log.Info().Msgf("Ignore a accept message as Paxos is in Phase [%v]", n.paxosInstance.phase)
-	}
+	//// Ignore messages if the proposer is not in Paxos phase 1
+	//if n.paxosInstance.currentPhase != 2 {
+	//	shouldIgnore = true
+	//	log.Info().Msgf("Ignore a accept message as Paxos is in Phase [%v]", n.paxosInstance.currentPhase)
+	//}
 
 	return shouldIgnore
 }
 
-func (n *node) BroadcastPaxosPromise(msgPaxosPrepare *types.PaxosPrepareMessage) error {
+func (n *node) BroadcastPaxosPromise(msgPaxosPrepare *types.PaxosPrepareMessage) {
 
-	// Init the channel for promise message
-	log.Info().Msgf("[BroadcastPaxosPromise] Init promise channel")
-	key := n.ComputePaxosChannelKey("promise", n.conf.PaxosID)
-	n.paxosMsgChannel.InitPaxosMsgChannel(key)
+	go func() {
+		// Response with a PaxosPromiseMessage inside PrivateMessage
+		// In prepared step -> don't change the AcceptedID
+		newPaxosPromiseMessage := types.PaxosPromiseMessage{
+			Step:          msgPaxosPrepare.Step, // current TLC identifier
+			ID:            msgPaxosPrepare.ID,   // proposer ID
+			AcceptedID:    n.paxosInstance.acceptedID,
+			AcceptedValue: n.paxosInstance.acceptedValue,
+		}
 
-	// Response with a PaxosPromiseMessage inside PrivateMessage
-	// In prepared step -> don't change the AcceptedID
-	newPaxosPromiseMessage := types.PaxosPromiseMessage{
-		Step:          msgPaxosPrepare.Step, // current TLC identifier
-		ID:            msgPaxosPrepare.ID,   // proposer ID
-		AcceptedID:    n.paxosInstance.acceptedID,
-		AcceptedValue: n.paxosInstance.acceptedValue,
-	}
+		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosPromiseMessage)
 
-	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosPromiseMessage)
+		recipients := make(map[string]struct{}, 0)
+		recipients[msgPaxosPrepare.Source] = struct{}{}
+		//log.Info().Msgf("[ExecPaxosPrepareMessage] recipients = %v, should contain %v", recipients, msgPaxosPrepare.Source)
+		newPrivateMessage := types.PrivateMessage{
+			Recipients: recipients,
+			Msg:        &transMsg,
+		}
+		transMsgBroadcast, _ := n.conf.MessageRegistry.MarshalMessage(newPrivateMessage)
+		log.Info().Msgf("[%v] Private (Paxos Promise) => everyone", n.conf.Socket.GetAddress())
 
-	recipients := make(map[string]struct{}, 0)
-	recipients[msgPaxosPrepare.Source] = struct{}{}
-	//log.Info().Msgf("[ExecPaxosPrepareMessage] recipients = %v, should contain %v", recipients, msgPaxosPrepare.Source)
-	newPrivateMessage := types.PrivateMessage{
-		Recipients: recipients,
-		Msg:        &transMsg,
-	}
-	transMsgBroadcast, _ := n.conf.MessageRegistry.MarshalMessage(newPrivateMessage)
-	log.Info().Msgf("[%v] Private (Paxos Promise) => everyone", n.conf.Socket.GetAddress())
-	err := n.Broadcast(transMsgBroadcast)
-	return err
+		n.paxosPromiseMajority.InitNotifier(msgPaxosPrepare.Step)
+		_ = n.Broadcast(transMsgBroadcast)
+
+	}()
 
 }
 
-func (n *node) BroadcastPaxosAccept(msgPaxosPropose *types.PaxosProposeMessage) error {
-	// Init the channel for promise message
-	log.Info().Msgf("[BroadcastPaxosAccept] Init accept channel")
-	key := n.ComputePaxosChannelKey("accept", n.conf.PaxosID)
-	n.paxosMsgChannel.InitPaxosMsgChannel(key)
-
+func (n *node) BroadcastPaxosAccept(msgPaxosPropose *types.PaxosProposeMessage) {
 	// Question: should I change it here?
 	// Need to change this later
-	n.paxosInstance.acceptedID = msgPaxosPropose.ID
-	n.paxosInstance.acceptedValue = &msgPaxosPropose.Value
+	go func() {
+		newPaxosAcceptMessage := types.PaxosAcceptMessage{
+			Step:  msgPaxosPropose.Step,
+			ID:    msgPaxosPropose.ID,
+			Value: msgPaxosPropose.Value,
+		}
+		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosAcceptMessage)
+		log.Info().Msgf("[%v] Paxos Accept => everyone", n.conf.Socket.GetAddress())
 
-	newPaxosAcceptMessage := types.PaxosAcceptMessage{
-		Step:  msgPaxosPropose.Step,
-		ID:    msgPaxosPropose.ID,
-		Value: msgPaxosPropose.Value,
-	}
-	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosAcceptMessage)
-	log.Info().Msgf("[%v] Paxos Accept => everyone", n.conf.Socket.GetAddress())
-	err := n.Broadcast(transMsg)
-	return err
+		n.paxosAcceptMajority.InitNotifier(msgPaxosPropose.Step)
+		_ = n.Broadcast(transMsg)
+	}()
 
 }
 
@@ -394,10 +388,11 @@ func (n *node) ExecRumorsMessage(msg types.Message, pkt transport.Packet) error 
 				Msg:    rumor.Msg,
 			}
 
-			//log.Info().Msgf("[ExecRumorsMessage] Call ProcessPacket")
+			log.Info().Msgf("[ExecRumorsMessage] Call ProcessPacket")
 			errProcess := n.conf.MessageRegistry.ProcessPacket(pktRumor)
 			err := checkTimeoutError(errProcess, 0)
 			if err != nil {
+				log.Error().Msgf("[ExecRumorsMessage] %v", err)
 				return err
 			}
 		}
@@ -728,35 +723,49 @@ func (n *node) ExecSearchReplyMessage(msg types.Message, pkt transport.Packet) e
 }
 
 func (n *node) ExecPaxosPrepareMessage(msg types.Message, pkt transport.Packet) error {
-	log.Info().Msgf("[%v] <= Paxos Prepare [%v]", n.conf.Socket.GetAddress(), pkt.Header.Source)
+
 	msgPaxosPrepare, ok := msg.(*types.PaxosPrepareMessage)
 	if !ok {
 		return xerrors.Errorf("wrong type: %T", msg)
 	}
+
+	log.Info().Msgf("[%v] <= Paxos Prepare (%v) [%v]", n.conf.Socket.GetAddress(), msgPaxosPrepare, pkt.Header.Source)
 
 	if n.CheckPaxosPrepareMessage(msgPaxosPrepare) {
 		// Ignore it
 		return nil
 	}
 
-	err := n.BroadcastPaxosPromise(msgPaxosPrepare)
-	return err
+	n.BroadcastPaxosPromise(msgPaxosPrepare)
+	return nil
 }
 
 func (n *node) ExecPaxosPromiseMessage(msg types.Message, pkt transport.Packet) error {
-	log.Info().Msgf("[%v] <= Paxos Promise [%v]", n.conf.Socket.GetAddress(), pkt.Header.Source)
+
 	msgPaxosPromise, ok := msg.(*types.PaxosPromiseMessage)
 	if !ok {
 		return xerrors.Errorf("wrong type: %T", msg)
 	}
+
+	log.Info().Msgf("[%v] <= Paxos Promise (%v) [%v]", n.conf.Socket.GetAddress(), msgPaxosPromise, pkt.Header.Source)
 
 	if n.CheckPaxosPromiseMessage(msgPaxosPromise) {
 		// Ignore it
 		return nil
 	}
 
-	key := n.ComputePaxosChannelKey("promise", n.conf.PaxosID)
-	n.paxosMsgChannel.SendToPaxosHandler(key, msgPaxosPromise)
+	go func() {
+		// Collect PaxosPromiseMessage Until a threshold
+		n.paxosPromiseMajority.UpdateCounter(msgPaxosPromise.Step, "")
+		n.paxosInstance.UpdatePaxosPromises(msgPaxosPromise)
+		if n.paxosPromiseMajority.GetCounter(msgPaxosPromise.Step, "") >=
+			n.conf.PaxosThreshold(n.conf.TotalPeers) {
+
+			// Send a notification to unblock
+			n.paxosPromiseMajority.UpdateNotifier(msgPaxosPromise.Step, true)
+			return
+		}
+	}()
 
 	return nil
 }
@@ -773,25 +782,44 @@ func (n *node) ExecPaxosProposeMessage(msg types.Message, pkt transport.Packet) 
 		return nil
 	}
 
-	err := n.BroadcastPaxosAccept(msgPaxosPropose)
-	return err
+	// this PaxosPropose is the one with maxID -> store its value
+	// Store the AcceptedID and AcceptedValue in paxosInstance (It's yours accepted value)
+	n.paxosInstance.UpdatePaxosAcceptedIDAndAcceptedValue(msgPaxosPropose)
+
+	n.BroadcastPaxosAccept(msgPaxosPropose)
+	return nil
 }
 
 func (n *node) ExecPaxosAcceptMessage(msg types.Message, pkt transport.Packet) error {
-	log.Info().Msgf("[%v] <= Paxos Accept [%v]", n.conf.Socket.GetAddress(), pkt.Header.Source)
-
 	msgPaxosAccept, ok := msg.(*types.PaxosAcceptMessage)
 	if !ok {
 		return xerrors.Errorf("wrong type: %T", msg)
 	}
+
+	log.Info().Msgf("[%v] <= Paxos Accept (%v) [%v]", n.conf.Socket.GetAddress(), msgPaxosAccept, pkt.Header.Source)
 
 	if n.CheckPaxosAcceptMessage(msgPaxosAccept) {
 		// Ignore
 		return nil
 	}
 
-	key := n.ComputePaxosChannelKey("accept", n.conf.PaxosID)
-	n.paxosMsgChannel.SendToPaxosHandler(key, msgPaxosAccept)
+	//if n.conf.Socket.GetAddress() == pkt.Header.Source {
+	//	return nil
+	//}
+	go func() {
+		n.paxosAcceptMajority.UpdateCounter(msgPaxosAccept.Step, msgPaxosAccept.Value.UniqID)
+		//n.paxosInstance.UpdatePaxosPromises(msgPaxosPromise)
+		log.Info().Msgf("[ExecPaxosAcceptMessage] paxosThreshold = %v", n.conf.PaxosThreshold(n.conf.TotalPeers))
+		if n.paxosAcceptMajority.GetCounter(msgPaxosAccept.Step, msgPaxosAccept.Value.UniqID) >=
+			n.conf.PaxosThreshold(n.conf.TotalPeers) {
+
+			log.Info().Msgf("[ExecPaxosAcceptMessage] [%v] paxosInstance AcceptedID %v, AcceptedValue %v",
+				n.conf.Socket.GetAddress(), n.paxosInstance.acceptedID, n.paxosInstance.acceptedValue)
+			// Send a notification to unblock
+			n.paxosAcceptMajority.UpdateNotifier(msgPaxosAccept.Step, true)
+			return
+		}
+	}()
 
 	return nil
 }

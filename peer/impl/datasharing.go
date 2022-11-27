@@ -454,12 +454,12 @@ func (n *node) Tag(name string, mh string) error {
 	}
 
 	// Implement Paxos
-	decidedValue, err := n.RunPaxosProposer(newProposedValue)
+	decidedValue, err := n.RunPaxos(newProposedValue)
 	if err != nil {
 		return err
 	}
 
-	log.Info().Msgf("[Tag] Store %v:%v in NamingStore", name, mh)
+	log.Info().Msgf("[Tag] Store %v:%v in NamingStore", decidedValue.Filename, decidedValue.Metahash)
 	n.conf.Storage.GetNamingStore().Set(decidedValue.Filename, []byte(decidedValue.Metahash))
 
 	// Question: when will return error??

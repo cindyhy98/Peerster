@@ -61,33 +61,40 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newSearchReplyChecker.Mutex = &sync.Mutex{}
 	newSearchReplyChecker.realSearchReplyChecker = make(map[string]chan []types.FileInfo)
 
-	var newPaxosMsgChannel safePaxosMsgChannel
-	newPaxosMsgChannel.Mutex = &sync.Mutex{}
-	newPaxosMsgChannel.realMsgChannel = make(map[string]chan types.Message)
-
 	var newPaxosInstance safePaxosInstance
 	newPaxosInstance.Mutex = &sync.Mutex{}
 	newPaxosInstance.maxID = 0
+	newPaxosInstance.offsetID = 0
 	newPaxosInstance.currentLogicalClock = 0
-	newPaxosInstance.phase = 0
 	newPaxosInstance.promises = make([]*types.PaxosPromiseMessage, 0)
 	newPaxosInstance.acceptedID = 0
 	newPaxosInstance.acceptedValue = nil
 
+	var newPaxosPromiseMajority safePaxosMajorityChecker
+	newPaxosPromiseMajority.Mutex = &sync.Mutex{}
+	newPaxosPromiseMajority.counter = make(map[uint]map[string]int)
+	newPaxosPromiseMajority.notifier = make(map[uint]chan bool)
+
+	var newPaxosAcceptMajority safePaxosMajorityChecker
+	newPaxosAcceptMajority.Mutex = &sync.Mutex{}
+	newPaxosAcceptMajority.counter = make(map[uint]map[string]int)
+	newPaxosAcceptMajority.notifier = make(map[uint]chan bool)
+
 	newNode := node{
-		conf:            conf,
-		stopChannel:     make(chan bool, 1),
-		tickerAntiEn:    newTickerAntiEn,
-		tickerHeartBeat: newTickerHeartBeat,
-		ackRecord:       newAckChecker,
-		routingtable:    newRoutingtable,
-		lastStatus:      newStatus,
-		sentRumor:       newSentRumor,
-		catalog:         newCatalog,
-		dataReply:       newDataReplyChecker,
-		searchReply:     newSearchReplyChecker,
-		paxosMsgChannel: newPaxosMsgChannel,
-		paxosInstance:   newPaxosInstance}
+		conf:                 conf,
+		stopChannel:          make(chan bool, 1),
+		tickerAntiEn:         newTickerAntiEn,
+		tickerHeartBeat:      newTickerHeartBeat,
+		ackRecord:            newAckChecker,
+		routingtable:         newRoutingtable,
+		lastStatus:           newStatus,
+		sentRumor:            newSentRumor,
+		catalog:              newCatalog,
+		dataReply:            newDataReplyChecker,
+		searchReply:          newSearchReplyChecker,
+		paxosInstance:        newPaxosInstance,
+		paxosPromiseMajority: newPaxosPromiseMajority,
+		paxosAcceptMajority:  newPaxosAcceptMajority}
 
 	// Register the handler
 	/* HW0 */
@@ -141,8 +148,10 @@ type node struct {
 	dataReply   dataReplyChecker
 	searchReply searchReplyChecker
 
-	paxosMsgChannel safePaxosMsgChannel
-	paxosInstance   safePaxosInstance
+	paxosInstance safePaxosInstance
+
+	paxosPromiseMajority safePaxosMajorityChecker
+	paxosAcceptMajority  safePaxosMajorityChecker
 }
 
 func checkTimeoutError(err error, timeout time.Duration) error {
@@ -245,7 +254,9 @@ func (n *node) CompareHeader(pkt transport.Packet) error {
 	if pktDest == socketAddr {
 		// the received packet is for this node
 		// -> the registry must be used to execute the callback associated with the message contained in the packet
+
 		err := n.conf.MessageRegistry.ProcessPacket(pkt)
+
 		if err != nil {
 			log.Error().Msgf("[CompareHeader Error] %v", err)
 			return err
