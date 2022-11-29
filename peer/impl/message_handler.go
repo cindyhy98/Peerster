@@ -330,7 +330,6 @@ func (n *node) CheckTLCMessage(msgTLC *types.TLCMessage) bool {
 }
 
 func (n *node) BroadcastPaxosPromise(msgPaxosPrepare *types.PaxosPrepareMessage) {
-
 	go func() {
 		// Response with a PaxosPromiseMessage inside PrivateMessage
 		// In prepared step -> don't change the AcceptedID
@@ -355,7 +354,6 @@ func (n *node) BroadcastPaxosPromise(msgPaxosPrepare *types.PaxosPrepareMessage)
 
 		//n.paxosPromiseMajority.InitNotifier(msgPaxosPrepare.Step)
 		_ = n.Broadcast(transMsgBroadcast)
-
 	}()
 
 }
@@ -812,16 +810,14 @@ func (n *node) ExecPaxosPromiseMessage(msg types.Message, pkt transport.Packet) 
 		return nil
 	}
 
-	go func() {
-		// Collect PaxosPromiseMessage Until a threshold
-		n.paxosCurrentState.UpdatePaxosPromises(msgPaxosPromise)
-		if n.paxosPromiseMajority.UpdateAndGetCounter(msgPaxosPromise.Step, "") >= n.conf.PaxosThreshold(n.conf.TotalPeers) {
-			log.Info().Msgf("[ExecPaxosPromiseMessage] send notify")
-			// Send a notification to unblock
-			n.paxosPromiseMajority.UpdateNotifier(msgPaxosPromise.Step, true)
+	// Collect PaxosPromiseMessage Until a threshold
+	n.paxosCurrentState.UpdatePaxosPromises(msgPaxosPromise)
+	if n.paxosPromiseMajority.UpdateAndGetCounter(msgPaxosPromise.Step, "") >= n.conf.PaxosThreshold(n.conf.TotalPeers) {
+		log.Info().Msgf("[ExecPaxosPromiseMessage] send notify")
+		// Send a notification to unblock
+		n.paxosPromiseMajority.UpdateNotifier(msgPaxosPromise.Step, true)
 
-		}
-	}()
+	}
 
 	return nil
 }
@@ -840,7 +836,8 @@ func (n *node) ExecPaxosProposeMessage(msg types.Message, pkt transport.Packet) 
 
 	// this PaxosPropose is the one with maxID -> store its value
 	// Store the AcceptedID and AcceptedValue in paxosCurrentState (It's yours accepted value)
-	n.paxosCurrentState.UpdatePaxosAcceptedIDAndAcceptedValue(msgPaxosPropose)
+	log.Info().Msgf("[ExecPaxosProposeMessage]")
+	n.paxosCurrentState.UpdatePaxosAcceptedIDAndAcceptedValue(*msgPaxosPropose)
 
 	n.BroadcastPaxosAccept(msgPaxosPropose)
 	return nil

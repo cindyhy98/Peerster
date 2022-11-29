@@ -128,8 +128,8 @@ func InitTlcCurrentState() SafeTlcCurrentState {
 	return newTlcCurrentState
 }
 
-func InitPaxosMajorityChecker() safePaxosMajorityChecker {
-	var newPaxosMajority safePaxosMajorityChecker
+func InitPaxosMajorityChecker() SafePaxosMajorityChecker {
+	var newPaxosMajority SafePaxosMajorityChecker
 	newPaxosMajority.Mutex = &sync.Mutex{}
 	newPaxosMajority.counter = make(map[uint]map[string]int)
 	newPaxosMajority.notifier = make(map[uint]chan bool)
@@ -166,9 +166,9 @@ type node struct {
 	paxosCurrentState SafePaxosCurrentState
 	tlcCurrentState   SafeTlcCurrentState
 
-	paxosPromiseMajority safePaxosMajorityChecker
-	paxosAcceptMajority  safePaxosMajorityChecker
-	tlcMajority          safePaxosMajorityChecker
+	paxosPromiseMajority SafePaxosMajorityChecker
+	paxosAcceptMajority  SafePaxosMajorityChecker
+	tlcMajority          SafePaxosMajorityChecker
 }
 
 func checkTimeoutError(err error, timeout time.Duration) error {

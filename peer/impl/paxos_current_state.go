@@ -57,7 +57,7 @@ func (pi *SafePaxosCurrentState) FindAcceptedValueInPaxosPromises(proposedValue 
 	return *pi.promises[selectedIndex].AcceptedValue
 }
 
-func (pi *SafePaxosCurrentState) UpdatePaxosAcceptedIDAndAcceptedValue(message *types.PaxosProposeMessage) {
+func (pi *SafePaxosCurrentState) UpdatePaxosAcceptedIDAndAcceptedValue(message types.PaxosProposeMessage) {
 	pi.Lock()
 	defer pi.Unlock()
 

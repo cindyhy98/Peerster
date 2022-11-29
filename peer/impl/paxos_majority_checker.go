@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-type safePaxosMajorityChecker struct {
+type SafePaxosMajorityChecker struct {
 	*sync.Mutex
 	counter  map[uint]map[string]int //[step][UniqueID]counter
 	notifier map[uint]chan bool
@@ -12,7 +12,7 @@ type safePaxosMajorityChecker struct {
 
 /* Counter Functionality */
 
-func (pmc *safePaxosMajorityChecker) UpdateAndGetCounter(key uint, UniqueID string) int {
+func (pmc *SafePaxosMajorityChecker) UpdateAndGetCounter(key uint, UniqueID string) int {
 	pmc.Lock()
 	defer pmc.Unlock()
 
@@ -45,7 +45,7 @@ func (pmc *safePaxosMajorityChecker) UpdateAndGetCounter(key uint, UniqueID stri
 
 /* Notifier Functionality */
 
-func (pmc *safePaxosMajorityChecker) InitNotifier(key uint) chan bool {
+func (pmc *SafePaxosMajorityChecker) InitNotifier(key uint) chan bool {
 	pmc.Lock()
 	defer pmc.Unlock()
 
@@ -53,21 +53,21 @@ func (pmc *safePaxosMajorityChecker) InitNotifier(key uint) chan bool {
 	return pmc.notifier[key]
 }
 
-func (pmc *safePaxosMajorityChecker) GetNotifier(key uint) chan bool {
+func (pmc *SafePaxosMajorityChecker) GetNotifier(key uint) chan bool {
 	pmc.Lock()
 	defer pmc.Unlock()
 
 	return pmc.notifier[key]
 }
 
-func (pmc *safePaxosMajorityChecker) UpdateNotifier(key uint, reachMajority bool) {
+func (pmc *SafePaxosMajorityChecker) UpdateNotifier(key uint, reachMajority bool) {
 	pmc.Lock()
 	defer pmc.Unlock()
 
 	pmc.notifier[key] <- reachMajority
 }
 
-func (pmc *safePaxosMajorityChecker) DeleteNotifier(key uint) {
+func (pmc *SafePaxosMajorityChecker) DeleteNotifier(key uint) {
 	pmc.Lock()
 	defer pmc.Unlock()
 
