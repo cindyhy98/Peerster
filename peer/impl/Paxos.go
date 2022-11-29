@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+/*
 func (n *node) BroadcastPaxosPrepare(ID uint) {
 
 	log.Info().Msgf("[BroadcastPaxosPrepare] ID = %v", ID)
@@ -23,6 +24,9 @@ func (n *node) BroadcastPaxosPrepare(ID uint) {
 
 }
 
+*/
+
+/*
 func (n *node) WaitForPaxosPromise(timeout time.Duration) bool {
 	notifier := false
 	notifierChannel := n.paxosPromiseMajority.InitNotifier(n.tlcCurrentState.currentLogicalClock)
@@ -41,6 +45,7 @@ func (n *node) WaitForPaxosPromise(timeout time.Duration) bool {
 	return notifier
 
 }
+*/
 
 func (n *node) EnterPhaseOne() {
 	notifierChannel := n.paxosPromiseMajority.InitNotifier(n.tlcCurrentState.currentLogicalClock)
@@ -48,21 +53,19 @@ func (n *node) EnterPhaseOne() {
 
 	for reachPromiseMajority := false; !reachPromiseMajority; {
 
-		go func() {
-			ID := n.conf.PaxosID + n.paxosCurrentState.offsetID*n.conf.TotalPeers
-			log.Info().Msgf("[BroadcastPaxosPrepare] ID = %v", ID)
-			// Broadcast a PaxosPrepareMessage
-			newPaxosPrepareMessage := types.PaxosPrepareMessage{
-				Step:   n.tlcCurrentState.currentLogicalClock,
-				ID:     ID,
-				Source: n.conf.Socket.GetAddress(),
-			}
+		ID := n.conf.PaxosID + n.paxosCurrentState.offsetID*n.conf.TotalPeers
+		log.Info().Msgf("[BroadcastPaxosPrepare] ID = %v", ID)
+		// Broadcast a PaxosPrepareMessage
+		newPaxosPrepareMessage := types.PaxosPrepareMessage{
+			Step:   n.tlcCurrentState.currentLogicalClock,
+			ID:     ID,
+			Source: n.conf.Socket.GetAddress(),
+		}
 
-			transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosPrepareMessage)
-			log.Info().Msgf("[BroadcastPaxosPrepare] [%v] Paxos Prepare => everyone", n.conf.Socket.GetAddress())
+		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosPrepareMessage)
+		log.Info().Msgf("[BroadcastPaxosPrepare] [%v] Paxos Prepare => everyone", n.conf.Socket.GetAddress())
 
-			_ = n.Broadcast(transMsg)
-		}()
+		_ = n.Broadcast(transMsg)
 
 		select {
 		case reachPromiseMajority = <-notifierChannel:
@@ -98,6 +101,7 @@ func (n *node) EnterPhaseOne() bool {
 }
 */
 
+/*
 func (n *node) BroadcastPaxosPropose(proposedValue types.PaxosValue) {
 	log.Info().Msgf("[BroadcastPaxosPropose] maxID = %v", n.paxosCurrentState.maxID)
 
@@ -114,7 +118,9 @@ func (n *node) BroadcastPaxosPropose(proposedValue types.PaxosValue) {
 	_ = n.Broadcast(transMsg)
 
 }
+*/
 
+/*
 func (n *node) WaitForPaxosAccept(timeout time.Duration) bool {
 	notifier := false
 	notifierChannel := n.paxosAcceptMajority.InitNotifier(n.tlcCurrentState.currentLogicalClock)
@@ -132,28 +138,27 @@ func (n *node) WaitForPaxosAccept(timeout time.Duration) bool {
 
 	return notifier
 }
+*/
 
 func (n *node) EnterPhaseTwo(proposedValue types.PaxosValue) bool {
 	reachAcceptMajority := false
 	notifierChannel := n.paxosAcceptMajority.InitNotifier(n.tlcCurrentState.currentLogicalClock)
 	defer n.paxosAcceptMajority.DeleteNotifier(n.tlcCurrentState.currentLogicalClock)
 
-	go func() {
-		ID := n.conf.PaxosID + n.paxosCurrentState.offsetID*n.conf.TotalPeers
-		log.Info().Msgf("[BroadcastPaxosPropose] maxID = %v", ID)
+	ID := n.conf.PaxosID + n.paxosCurrentState.offsetID*n.conf.TotalPeers
+	log.Info().Msgf("[BroadcastPaxosPropose] maxID = %v", ID)
 
-		// Broadcast a PaxosProposeMessage
-		newPaxosProposeMessage := types.PaxosProposeMessage{
-			Step:  n.tlcCurrentState.currentLogicalClock,
-			ID:    ID,
-			Value: n.paxosCurrentState.FindAcceptedValueInPaxosPromises(proposedValue),
-		}
+	// Broadcast a PaxosProposeMessage
+	newPaxosProposeMessage := types.PaxosProposeMessage{
+		Step:  n.tlcCurrentState.currentLogicalClock,
+		ID:    ID,
+		Value: n.paxosCurrentState.FindAcceptedValueInPaxosPromises(proposedValue),
+	}
 
-		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosProposeMessage)
-		log.Info().Msgf("[BroadcastPaxosPropose] [%v] Paxos Propose => everyone", n.conf.Socket.GetAddress())
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosProposeMessage)
+	log.Info().Msgf("[BroadcastPaxosPropose] [%v] Paxos Propose => everyone", n.conf.Socket.GetAddress())
 
-		_ = n.Broadcast(transMsg)
-	}()
+	_ = n.Broadcast(transMsg)
 
 	select {
 	case reachAcceptMajority = <-notifierChannel:
@@ -217,8 +222,8 @@ func (n *node) RunPaxos(proposedValue types.PaxosValue) (types.PaxosValue, error
 
 	log.Info().Msgf("[RunPaxos] acceptedValue = %v", n.paxosCurrentState.acceptedValue)
 
-	if n.paxosCurrentState.acceptedValue != nil {
-		decidedValue = *n.paxosCurrentState.acceptedValue
+	if n.paxosCurrentState.finalAcceptValue != nil {
+		decidedValue = *n.paxosCurrentState.finalAcceptValue
 	}
 
 	log.Info().Msgf("[RunPaxos] after running Paxos decidedValue = %v", decidedValue)

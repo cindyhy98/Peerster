@@ -114,6 +114,7 @@ func InitPaxosCurrentState() SafePaxosCurrentState {
 	newPaxosCurrentState.promises = make([]*types.PaxosPromiseMessage, 0)
 	newPaxosCurrentState.acceptedID = 0
 	newPaxosCurrentState.acceptedValue = nil
+	newPaxosCurrentState.finalAcceptValue = nil
 
 	return newPaxosCurrentState
 }
@@ -459,7 +460,7 @@ func (n *node) Broadcast(msg transport.Message) error {
 	// Transform RumorMessages to Messages
 	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newMsgRumor)
 	pktRumor := transport.Packet{Header: &header, Msg: &transMsg}
-	//log.Info().Msgf("[Broadcast] Call ProcessPacket")
+
 	errProcess := n.conf.MessageRegistry.ProcessPacket(pktRumor)
 
 	return checkTimeoutError(errProcess, 0)

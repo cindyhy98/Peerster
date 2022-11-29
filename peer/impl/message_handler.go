@@ -330,85 +330,80 @@ func (n *node) CheckTLCMessage(msgTLC *types.TLCMessage) bool {
 }
 
 func (n *node) BroadcastPaxosPromise(msgPaxosPrepare *types.PaxosPrepareMessage) {
-	go func() {
-		// Response with a PaxosPromiseMessage inside PrivateMessage
-		// In prepared step -> don't change the AcceptedID
-		newPaxosPromiseMessage := types.PaxosPromiseMessage{
-			Step:          msgPaxosPrepare.Step, // current TLC identifier
-			ID:            msgPaxosPrepare.ID,   // proposer ID
-			AcceptedID:    n.paxosCurrentState.acceptedID,
-			AcceptedValue: n.paxosCurrentState.acceptedValue,
-		}
 
-		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosPromiseMessage)
+	// Response with a PaxosPromiseMessage inside PrivateMessage
+	// In prepared step -> don't change the AcceptedID
+	newPaxosPromiseMessage := types.PaxosPromiseMessage{
+		Step:          msgPaxosPrepare.Step, // current TLC identifier
+		ID:            msgPaxosPrepare.ID,   // proposer ID
+		AcceptedID:    n.paxosCurrentState.acceptedID,
+		AcceptedValue: n.paxosCurrentState.acceptedValue,
+	}
 
-		recipients := make(map[string]struct{}, 0)
-		recipients[msgPaxosPrepare.Source] = struct{}{}
-		//log.Info().Msgf("[ExecPaxosPrepareMessage] recipients = %v, should contain %v", recipients, msgPaxosPrepare.Source)
-		newPrivateMessage := types.PrivateMessage{
-			Recipients: recipients,
-			Msg:        &transMsg,
-		}
-		transMsgBroadcast, _ := n.conf.MessageRegistry.MarshalMessage(newPrivateMessage)
-		log.Info().Msgf("[%v] Private (Paxos Promise) => everyone", n.conf.Socket.GetAddress())
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosPromiseMessage)
 
-		//n.paxosPromiseMajority.InitNotifier(msgPaxosPrepare.Step)
-		_ = n.Broadcast(transMsgBroadcast)
-	}()
+	recipients := make(map[string]struct{}, 0)
+	recipients[msgPaxosPrepare.Source] = struct{}{}
+	//log.Info().Msgf("[ExecPaxosPrepareMessage] recipients = %v, should contain %v", recipients, msgPaxosPrepare.Source)
+	newPrivateMessage := types.PrivateMessage{
+		Recipients: recipients,
+		Msg:        &transMsg,
+	}
+	transMsgBroadcast, _ := n.conf.MessageRegistry.MarshalMessage(newPrivateMessage)
+	log.Info().Msgf("[%v] Private (Paxos Promise) => everyone", n.conf.Socket.GetAddress())
+
+	//n.paxosPromiseMajority.InitNotifier(msgPaxosPrepare.Step)
+	_ = n.Broadcast(transMsgBroadcast)
 
 }
 
 func (n *node) BroadcastPaxosAccept(msgPaxosPropose *types.PaxosProposeMessage) {
 	// Question: should I change it here?
 	// Need to change this later
-	go func() {
-		newPaxosAcceptMessage := types.PaxosAcceptMessage{
-			Step:  msgPaxosPropose.Step,
-			ID:    msgPaxosPropose.ID,
-			Value: msgPaxosPropose.Value,
-		}
-		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosAcceptMessage)
-		log.Info().Msgf("[%v] Paxos Accept => everyone", n.conf.Socket.GetAddress())
 
-		//n.paxosAcceptMajority.InitNotifier(msgPaxosPropose.Step)
-		_ = n.Broadcast(transMsg)
-	}()
+	newPaxosAcceptMessage := types.PaxosAcceptMessage{
+		Step:  msgPaxosPropose.Step,
+		ID:    msgPaxosPropose.ID,
+		Value: msgPaxosPropose.Value,
+	}
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosAcceptMessage)
+
+	//n.paxosAcceptMajority.InitNotifier(msgPaxosPropose.Step)
+	_ = n.Broadcast(transMsg)
+	log.Info().Msgf("[%v] Paxos Accept => everyone", n.conf.Socket.GetAddress())
 
 }
 
 func (n *node) BroadcastFirstTLC(msgPaxosAccept *types.PaxosAcceptMessage) {
 
-	go func() {
-		log.Info().Msgf("[BroadcastFirstTLC] this tlc step = %v", n.tlcCurrentState.currentLogicalClock)
-		newTLCMessage := types.TLCMessage{
-			Step:  n.tlcCurrentState.currentLogicalClock,
-			Block: n.BuildBlock(n.tlcCurrentState.currentLogicalClock, nil, msgPaxosAccept.Value),
-		}
+	log.Info().Msgf("[BroadcastFirstTLC] this tlc step = %v", n.tlcCurrentState.currentLogicalClock)
+	newTLCMessage := types.TLCMessage{
+		Step:  n.tlcCurrentState.currentLogicalClock,
+		Block: n.BuildBlock(n.tlcCurrentState.currentLogicalClock, nil, msgPaxosAccept.Value),
+	}
 
-		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newTLCMessage)
-		log.Info().Msgf("[BroadcastFirstTLC] [%v] TLC => everyone", n.conf.Socket.GetAddress())
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newTLCMessage)
+	log.Info().Msgf("[BroadcastFirstTLC] [%v] TLC => everyone", n.conf.Socket.GetAddress())
 
-		n.tlcCurrentState.UpdateHasBroadcast()
-		_ = n.Broadcast(transMsg)
-	}()
+	n.tlcCurrentState.UpdateHasBroadcast()
+	_ = n.Broadcast(transMsg)
 
 }
 
 func (n *node) BroadcastTLC(msgTLC *types.TLCMessage) {
 	// should it be a go routine?
-	go func() {
-		log.Info().Msgf("[BroadcastTLC] this tlc step = %v", msgTLC.Step)
-		newTLCMessage := types.TLCMessage{
-			Step:  msgTLC.Step,
-			Block: n.BuildBlock(msgTLC.Step, msgTLC.Block.PrevHash, msgTLC.Block.Value),
-		}
 
-		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newTLCMessage)
-		log.Info().Msgf("[BroadcastTLC] [%v] TLC => everyone", n.conf.Socket.GetAddress())
+	log.Info().Msgf("[BroadcastTLC] this tlc step = %v", msgTLC.Step)
+	newTLCMessage := types.TLCMessage{
+		Step:  msgTLC.Step,
+		Block: n.BuildBlock(msgTLC.Step, msgTLC.Block.PrevHash, msgTLC.Block.Value),
+	}
 
-		n.tlcCurrentState.UpdateHasBroadcast()
-		_ = n.Broadcast(transMsg)
-	}()
+	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newTLCMessage)
+	log.Info().Msgf("[BroadcastTLC] [%v] TLC => everyone", n.conf.Socket.GetAddress())
+
+	n.tlcCurrentState.UpdateHasBroadcast()
+	_ = n.Broadcast(transMsg)
 
 }
 
@@ -444,7 +439,6 @@ func (n *node) ExecRumorsMessage(msg types.Message, pkt transport.Packet) error 
 				Msg:    rumor.Msg,
 			}
 
-			log.Info().Msgf("[ExecRumorsMessage] Call ProcessPacket")
 			errProcess := n.conf.MessageRegistry.ProcessPacket(pktRumor)
 			err := checkTimeoutError(errProcess, 0)
 			if err != nil {
@@ -810,8 +804,9 @@ func (n *node) ExecPaxosPromiseMessage(msg types.Message, pkt transport.Packet) 
 		return nil
 	}
 
+	n.paxosCurrentState.StorePaxosPromises(msgPaxosPromise)
+
 	// Collect PaxosPromiseMessage Until a threshold
-	n.paxosCurrentState.UpdatePaxosPromises(msgPaxosPromise)
 	if n.paxosPromiseMajority.UpdateAndGetCounter(msgPaxosPromise.Step, "") >= n.conf.PaxosThreshold(n.conf.TotalPeers) {
 		log.Info().Msgf("[ExecPaxosPromiseMessage] send notify")
 		// Send a notification to unblock
@@ -836,7 +831,6 @@ func (n *node) ExecPaxosProposeMessage(msg types.Message, pkt transport.Packet) 
 
 	// this PaxosPropose is the one with maxID -> store its value
 	// Store the AcceptedID and AcceptedValue in paxosCurrentState (It's yours accepted value)
-	log.Info().Msgf("[ExecPaxosProposeMessage]")
 	n.paxosCurrentState.UpdatePaxosAcceptedIDAndAcceptedValue(*msgPaxosPropose)
 
 	n.BroadcastPaxosAccept(msgPaxosPropose)
@@ -857,19 +851,19 @@ func (n *node) ExecPaxosAcceptMessage(msg types.Message, pkt transport.Packet) e
 	}
 
 	log.Info().Msgf("[ExecPaxosAcceptMessage] paxosThreshold = %v", n.conf.PaxosThreshold(n.conf.TotalPeers))
-	go func() {
-		if n.paxosAcceptMajority.UpdateAndGetCounter(msgPaxosAccept.Step, msgPaxosAccept.Value.UniqID) >=
-			n.conf.PaxosThreshold(n.conf.TotalPeers) {
 
-			log.Info().Msgf("[ExecPaxosAcceptMessage] [%v] paxosCurrentState AcceptedID %v, AcceptedValue %v",
-				n.conf.Socket.GetAddress(), n.paxosCurrentState.acceptedID, n.paxosCurrentState.acceptedValue)
-			// Send a notification to unblock
-			n.paxosAcceptMajority.UpdateNotifier(msgPaxosAccept.Step, true)
+	if n.paxosAcceptMajority.UpdateAndGetCounter(msgPaxosAccept.Step, msgPaxosAccept.Value.UniqID) >=
+		n.conf.PaxosThreshold(n.conf.TotalPeers) {
 
-			n.BroadcastFirstTLC(msgPaxosAccept)
+		log.Info().Msgf("[ExecPaxosAcceptMessage] [%v] paxosCurrentState AcceptedID %v, AcceptedValue %v",
+			n.conf.Socket.GetAddress(), n.paxosCurrentState.acceptedID, n.paxosCurrentState.acceptedValue)
+		// Send a notification to unblock
+		n.paxosCurrentState.UpdateFinalAcceptValue(*msgPaxosAccept)
+		n.paxosAcceptMajority.UpdateNotifier(msgPaxosAccept.Step, true)
 
-		}
-	}()
+		n.BroadcastFirstTLC(msgPaxosAccept)
+
+	}
 
 	return nil
 }
