@@ -30,7 +30,7 @@ func (pmc *safePaxosMajorityChecker) UpdateAndGetCounter(key uint, UniqueID stri
 	}
 
 	// Increase the counter
-	pmc.counter[key][UniqueID] += 1
+	pmc.counter[key][UniqueID]++
 	return pmc.counter[key][UniqueID]
 
 }

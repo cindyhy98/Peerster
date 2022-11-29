@@ -47,8 +47,8 @@ func (n *node) WaitForPaxosPromise(timeout time.Duration) bool {
 func (n *node) EnterPhaseOne() bool {
 	reachPromiseMajority := false
 
-	Id := n.conf.PaxosID + n.paxosCurrentState.offsetID*n.conf.TotalPeers
-	n.BroadcastPaxosPrepare(Id)
+	ID := n.conf.PaxosID + n.paxosCurrentState.offsetID*n.conf.TotalPeers
+	n.BroadcastPaxosPrepare(ID)
 
 	// Wait for a majority of PaxosPromise
 	reachPromiseMajority = n.WaitForPaxosPromise(n.conf.PaxosProposerRetry)

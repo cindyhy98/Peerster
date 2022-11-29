@@ -16,7 +16,7 @@ func (tlc *safeTlcCurrentState) IncrementStep() {
 	tlc.Lock()
 	defer tlc.Unlock()
 
-	tlc.currentLogicalClock += 1
+	tlc.currentLogicalClock++
 }
 
 func (tlc *safeTlcCurrentState) UpdateHasBroadcast() {
