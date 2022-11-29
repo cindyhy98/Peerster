@@ -114,25 +114,6 @@ func (n *node) EnterPhaseTwo(proposedValue types.PaxosValue) bool {
 
 }
 
-func (n *node) WaitForTLC() bool {
-	notifier := false
-	notifierChannel := n.tlcMajority.InitNotifier(n.tlcCurrentState.currentLogicalClock)
-	defer n.tlcMajority.DeleteNotifier(n.tlcCurrentState.currentLogicalClock)
-
-	log.Debug().Msgf("TLC %v", notifierChannel)
-	select {
-	case notifier = <-notifierChannel:
-		// Reach a majority of PaxosPromises -> progress to phase two
-		log.Info().Msgf("[WaitForTLC] get a majority of TLC")
-	}
-
-	return notifier
-}
-
-func (n *node) EnterPhaseTLC() bool {
-	return n.WaitForTLC()
-}
-
 func (n *node) RunPaxos(proposedValue types.PaxosValue) (types.PaxosValue, error) {
 
 	decidedValue := proposedValue

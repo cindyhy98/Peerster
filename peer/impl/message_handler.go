@@ -243,7 +243,8 @@ func (n *node) CheckPaxosPrepareMessage(msgPaxosPrepare *types.PaxosPrepareMessa
 
 	if msgPaxosPrepare.ID <= n.paxosCurrentState.maxID {
 		shouldIgnore = true
-		log.Info().Msgf("Ignore a prepare message as Paxos ID (%v) isn't greater than the maxID (%v)", msgPaxosPrepare.ID, n.paxosCurrentState.maxID)
+		log.Info().Msgf("Ignore a prepare message as Paxos ID (%v) isn't greater than the maxID (%v)",
+			msgPaxosPrepare.ID, n.paxosCurrentState.maxID)
 	} else {
 		log.Info().Msgf("[CheckPaxosPrepareMessage] Update maxID to %v in prepare phase", msgPaxosPrepare.ID)
 		n.paxosCurrentState.maxID = msgPaxosPrepare.ID
@@ -282,7 +283,8 @@ func (n *node) CheckPaxosProposeMessage(msgPaxosPropose *types.PaxosProposeMessa
 
 	if msgPaxosPropose.ID != n.paxosCurrentState.maxID {
 		shouldIgnore = true
-		log.Info().Msgf("Ignore a propose message as Paxos ID (%v) isn't equal the maxID (%v)", msgPaxosPropose.ID, n.paxosCurrentState.maxID)
+		log.Info().Msgf("Ignore a propose message as Paxos ID (%v) isn't equal the maxID (%v)",
+			msgPaxosPropose.ID, n.paxosCurrentState.maxID)
 	}
 
 	return shouldIgnore
@@ -313,7 +315,8 @@ func (n *node) CheckTLCMessage(msgTLC *types.TLCMessage) bool {
 	// Ignore messages whose Step field is smaller than your current step
 	if msgTLC.Step < n.tlcCurrentState.currentLogicalClock {
 		shouldIgnore = true
-		log.Info().Msgf("Ignore old TLCmessage, currentStep = %v, thisStep = %v", n.tlcCurrentState.currentLogicalClock, msgTLC.Step)
+		log.Info().Msgf("Ignore old TLCmessage, currentStep = %v, thisStep = %v",
+			n.tlcCurrentState.currentLogicalClock, msgTLC.Step)
 	}
 
 	// store the future step tlc message in tlcCurrentState
@@ -913,7 +916,6 @@ func (n *node) ExecTLCMessage(msg types.Message, pkt transport.Packet) error {
 
 			// Step 4: Increase by 1 its internal TLC step
 			n.tlcCurrentState.IncrementStep()
-			// TODO: catch up
 			isCatchUp = true
 			// Check the message of this incrementedStep that store in tlcCurrentState.futureTLCMessage
 

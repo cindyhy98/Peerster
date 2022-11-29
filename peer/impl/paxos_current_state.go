@@ -19,7 +19,7 @@ func (pi *safePaxosCurrentState) UpdatePaxosOffsetID() {
 	pi.Lock()
 	defer pi.Unlock()
 
-	pi.offsetID += 1
+	pi.offsetID++
 }
 
 func (pi *safePaxosCurrentState) UpdatePaxosPromises(message *types.PaxosPromiseMessage) {
@@ -40,7 +40,7 @@ func (pi *safePaxosCurrentState) FindAcceptedValueInPaxosPromises(proposedValue 
 	selectedIndex := 0
 	for i, promise := range pi.promises {
 		if promise.AcceptedValue == nil {
-			numberOfAcceptedValue += 1
+			numberOfAcceptedValue++
 			continue
 		}
 		if promise.AcceptedID > maxAcceptedID {
