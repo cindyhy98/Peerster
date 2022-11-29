@@ -368,9 +368,8 @@ func (n *node) BroadcastPaxosAccept(msgPaxosPropose *types.PaxosProposeMessage) 
 	}
 	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosAcceptMessage)
 
-	//n.paxosAcceptMajority.InitNotifier(msgPaxosPropose.Step)
-	_ = n.Broadcast(transMsg)
 	log.Info().Msgf("[%v] Paxos Accept => everyone", n.conf.Socket.GetAddress())
+	_ = n.Broadcast(transMsg)
 
 }
 
@@ -810,7 +809,9 @@ func (n *node) ExecPaxosPromiseMessage(msg types.Message, pkt transport.Packet) 
 	if n.paxosPromiseMajority.UpdateAndGetCounter(msgPaxosPromise.Step, "") >= n.conf.PaxosThreshold(n.conf.TotalPeers) {
 		log.Info().Msgf("[ExecPaxosPromiseMessage] send notify")
 		// Send a notification to unblock
-		n.paxosPromiseMajority.UpdateNotifier(msgPaxosPromise.Step, true)
+		if n.paxosPromiseMajority.CheckIfNotifierExist(msgPaxosPromise.Step) {
+			n.paxosPromiseMajority.UpdateNotifier(msgPaxosPromise.Step, true)
+		}
 
 	}
 
@@ -859,7 +860,10 @@ func (n *node) ExecPaxosAcceptMessage(msg types.Message, pkt transport.Packet) e
 			n.conf.Socket.GetAddress(), n.paxosCurrentState.acceptedID, n.paxosCurrentState.acceptedValue)
 		// Send a notification to unblock
 		n.paxosCurrentState.UpdateFinalAcceptValue(*msgPaxosAccept)
-		n.paxosAcceptMajority.UpdateNotifier(msgPaxosAccept.Step, true)
+
+		if n.paxosAcceptMajority.CheckIfNotifierExist(msgPaxosAccept.Step) {
+			n.paxosAcceptMajority.UpdateNotifier(msgPaxosAccept.Step, true)
+		}
 
 		n.BroadcastFirstTLC(msgPaxosAccept)
 
