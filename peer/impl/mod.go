@@ -12,6 +12,32 @@ import (
 	"time"
 )
 
+func RegisterMessageHandler(conf peer.Configuration, newNode node) {
+	// Register the handler
+	/* HW0 */
+	conf.MessageRegistry.RegisterMessageCallback(types.ChatMessage{}, newNode.ExecChatMessage)
+
+	/* HW1 */
+	conf.MessageRegistry.RegisterMessageCallback(types.RumorsMessage{}, newNode.ExecRumorsMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.AckMessage{}, newNode.ExecAckMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.StatusMessage{}, newNode.ExecStatusMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.EmptyMessage{}, newNode.ExecEmptyMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.PrivateMessage{}, newNode.ExecPrivateMessage)
+
+	/* HW2 */
+	conf.MessageRegistry.RegisterMessageCallback(types.DataRequestMessage{}, newNode.ExecDataRequestMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.DataReplyMessage{}, newNode.ExecDataReplyMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.SearchRequestMessage{}, newNode.ExecSearchRequestMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.SearchReplyMessage{}, newNode.ExecSearchReplyMessage)
+
+	/* HW3 */
+	conf.MessageRegistry.RegisterMessageCallback(types.PaxosPrepareMessage{}, newNode.ExecPaxosPrepareMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.PaxosPromiseMessage{}, newNode.ExecPaxosPromiseMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.PaxosProposeMessage{}, newNode.ExecPaxosProposeMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.PaxosAcceptMessage{}, newNode.ExecPaxosAcceptMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.TLCMessage{}, newNode.ExecTLCMessage)
+}
+
 // NewPeer creates a new peer. You can change the content and location of this
 // function but you MUST NOT change its signature and package location.
 func NewPeer(conf peer.Configuration) peer.Peer {
@@ -108,29 +134,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 		paxosAcceptMajority:  newPaxosAcceptMajority,
 		tlcMajority:          newTlcMajority}
 
-	// Register the handler
-	/* HW0 */
-	conf.MessageRegistry.RegisterMessageCallback(types.ChatMessage{}, newNode.ExecChatMessage)
-
-	/* HW1 */
-	conf.MessageRegistry.RegisterMessageCallback(types.RumorsMessage{}, newNode.ExecRumorsMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.AckMessage{}, newNode.ExecAckMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.StatusMessage{}, newNode.ExecStatusMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.EmptyMessage{}, newNode.ExecEmptyMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.PrivateMessage{}, newNode.ExecPrivateMessage)
-
-	/* HW2 */
-	conf.MessageRegistry.RegisterMessageCallback(types.DataRequestMessage{}, newNode.ExecDataRequestMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.DataReplyMessage{}, newNode.ExecDataReplyMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.SearchRequestMessage{}, newNode.ExecSearchRequestMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.SearchReplyMessage{}, newNode.ExecSearchReplyMessage)
-
-	/* HW3 */
-	conf.MessageRegistry.RegisterMessageCallback(types.PaxosPrepareMessage{}, newNode.ExecPaxosPrepareMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.PaxosPromiseMessage{}, newNode.ExecPaxosPromiseMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.PaxosProposeMessage{}, newNode.ExecPaxosProposeMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.PaxosAcceptMessage{}, newNode.ExecPaxosAcceptMessage)
-	conf.MessageRegistry.RegisterMessageCallback(types.TLCMessage{}, newNode.ExecTLCMessage)
+	RegisterMessageHandler(conf, newNode)
 
 	return &newNode
 }
