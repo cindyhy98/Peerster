@@ -5,35 +5,35 @@ import (
 	"sync"
 )
 
-type safeTlcCurrentState struct {
+type SafeTlcCurrentState struct {
 	*sync.Mutex
 	currentLogicalClock uint
 	hasBroadcast        bool
 	futureTLCMessage    map[uint]types.TLCMessage
 }
 
-func (tlc *safeTlcCurrentState) IncrementStep() {
+func (tlc *SafeTlcCurrentState) IncrementStep() {
 	tlc.Lock()
 	defer tlc.Unlock()
 
 	tlc.currentLogicalClock++
 }
 
-func (tlc *safeTlcCurrentState) UpdateHasBroadcast() {
+func (tlc *SafeTlcCurrentState) UpdateHasBroadcast() {
 	tlc.Lock()
 	defer tlc.Unlock()
 
 	tlc.hasBroadcast = true
 }
 
-func (tlc *safeTlcCurrentState) UpdateFutureTLCMessage(step uint, message types.TLCMessage) {
+func (tlc *SafeTlcCurrentState) UpdateFutureTLCMessage(step uint, message types.TLCMessage) {
 	tlc.Lock()
 	defer tlc.Unlock()
 
 	tlc.futureTLCMessage[step] = message
 }
 
-func (tlc *safeTlcCurrentState) GetFutureTLCMessage(step uint) (types.TLCMessage, bool) {
+func (tlc *SafeTlcCurrentState) GetFutureTLCMessage(step uint) (types.TLCMessage, bool) {
 	tlc.Lock()
 	defer tlc.Unlock()
 

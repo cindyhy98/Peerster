@@ -87,7 +87,27 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newSearchReplyChecker.Mutex = &sync.Mutex{}
 	newSearchReplyChecker.realSearchReplyChecker = make(map[string]chan []types.FileInfo)
 
-	var newPaxosCurrentState safePaxosCurrentState
+	newPaxosCurrentState := InitPaxosCurrentState()
+	newTlcCurrentState := InitTlcCurrentState()
+	newPaxosPromiseMajority := InitPaxosMajorityChecker()
+	newPaxosAcceptMajority := InitPaxosMajorityChecker()
+	newTlcMajority := InitPaxosMajorityChecker()
+
+	newNode := node{
+		conf: conf, stopChannel: make(chan bool, 1), tickerAntiEn: newTickerAntiEn,
+		tickerHeartBeat: newTickerHeartBeat, ackRecord: newAckChecker, routingtable: newRoutingtable,
+		lastStatus: newStatus, sentRumor: newSentRumor, catalog: newCatalog, dataReply: newDataReplyChecker,
+		searchReply: newSearchReplyChecker, paxosCurrentState: newPaxosCurrentState,
+		tlcCurrentState: newTlcCurrentState, paxosPromiseMajority: newPaxosPromiseMajority,
+		paxosAcceptMajority: newPaxosAcceptMajority, tlcMajority: newTlcMajority}
+
+	RegisterMessageHandler(conf, newNode)
+
+	return &newNode
+}
+
+func InitPaxosCurrentState() SafePaxosCurrentState {
+	var newPaxosCurrentState SafePaxosCurrentState
 	newPaxosCurrentState.Mutex = &sync.Mutex{}
 	newPaxosCurrentState.maxID = 0
 	newPaxosCurrentState.offsetID = 0
@@ -95,48 +115,26 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newPaxosCurrentState.acceptedID = 0
 	newPaxosCurrentState.acceptedValue = nil
 
-	var newTlcCurrentState safeTlcCurrentState
+	return newPaxosCurrentState
+}
+
+func InitTlcCurrentState() SafeTlcCurrentState {
+	var newTlcCurrentState SafeTlcCurrentState
 	newTlcCurrentState.Mutex = &sync.Mutex{}
 	newTlcCurrentState.currentLogicalClock = 0
 	newTlcCurrentState.hasBroadcast = false
 	newTlcCurrentState.futureTLCMessage = make(map[uint]types.TLCMessage, 0)
 
-	var newPaxosPromiseMajority safePaxosMajorityChecker
-	newPaxosPromiseMajority.Mutex = &sync.Mutex{}
-	newPaxosPromiseMajority.counter = make(map[uint]map[string]int)
-	newPaxosPromiseMajority.notifier = make(map[uint]chan bool)
+	return newTlcCurrentState
+}
 
-	var newPaxosAcceptMajority safePaxosMajorityChecker
-	newPaxosAcceptMajority.Mutex = &sync.Mutex{}
-	newPaxosAcceptMajority.counter = make(map[uint]map[string]int)
-	newPaxosAcceptMajority.notifier = make(map[uint]chan bool)
+func InitPaxosMajorityChecker() safePaxosMajorityChecker {
+	var newPaxosMajority safePaxosMajorityChecker
+	newPaxosMajority.Mutex = &sync.Mutex{}
+	newPaxosMajority.counter = make(map[uint]map[string]int)
+	newPaxosMajority.notifier = make(map[uint]chan bool)
 
-	var newTlcMajority safePaxosMajorityChecker
-	newTlcMajority.Mutex = &sync.Mutex{}
-	newTlcMajority.counter = make(map[uint]map[string]int)
-	newTlcMajority.notifier = make(map[uint]chan bool)
-
-	newNode := node{
-		conf:                 conf,
-		stopChannel:          make(chan bool, 1),
-		tickerAntiEn:         newTickerAntiEn,
-		tickerHeartBeat:      newTickerHeartBeat,
-		ackRecord:            newAckChecker,
-		routingtable:         newRoutingtable,
-		lastStatus:           newStatus,
-		sentRumor:            newSentRumor,
-		catalog:              newCatalog,
-		dataReply:            newDataReplyChecker,
-		searchReply:          newSearchReplyChecker,
-		paxosCurrentState:    newPaxosCurrentState,
-		tlcCurrentState:      newTlcCurrentState,
-		paxosPromiseMajority: newPaxosPromiseMajority,
-		paxosAcceptMajority:  newPaxosAcceptMajority,
-		tlcMajority:          newTlcMajority}
-
-	RegisterMessageHandler(conf, newNode)
-
-	return &newNode
+	return newPaxosMajority
 }
 
 type timeTicker struct {
@@ -165,8 +163,8 @@ type node struct {
 	dataReply   dataReplyChecker
 	searchReply searchReplyChecker
 
-	paxosCurrentState safePaxosCurrentState
-	tlcCurrentState   safeTlcCurrentState
+	paxosCurrentState SafePaxosCurrentState
+	tlcCurrentState   SafeTlcCurrentState
 
 	paxosPromiseMajority safePaxosMajorityChecker
 	paxosAcceptMajority  safePaxosMajorityChecker
