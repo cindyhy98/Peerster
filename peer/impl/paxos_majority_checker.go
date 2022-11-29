@@ -12,17 +12,17 @@ type safePaxosMajorityChecker struct {
 
 /* Counter Functionality */
 
-func (pmc *safePaxosMajorityChecker) UpdateCounter(key uint, UniqueID string) {
+func (pmc *safePaxosMajorityChecker) UpdateAndGetCounter(key uint, UniqueID string) int {
 	pmc.Lock()
 	defer pmc.Unlock()
 
 	// For PaxosPropose message
 	if UniqueID == "" {
-		UniqueID = "0"
+		UniqueID = "-"
 	}
 
 	if _, ok := pmc.counter[key]; !ok {
-		pmc.counter[key] = make(map[string]int, 0)
+		pmc.counter[key] = make(map[string]int)
 	}
 
 	if _, ok := pmc.counter[key][UniqueID]; !ok {
@@ -31,24 +31,26 @@ func (pmc *safePaxosMajorityChecker) UpdateCounter(key uint, UniqueID string) {
 
 	// Increase the counter
 	pmc.counter[key][UniqueID] += 1
-
-}
-
-func (pmc *safePaxosMajorityChecker) GetCounter(key uint, UniqueID string) int {
-	pmc.Lock()
-	defer pmc.Unlock()
-
 	return pmc.counter[key][UniqueID]
 
 }
 
+//func (pmc *safePaxosMajorityChecker) GetCounter(key uint, UniqueID string) int {
+//	pmc.Lock()
+//	defer pmc.Unlock()
+//
+//	return pmc.counter[key][UniqueID]
+//
+//}
+
 /* Notifier Functionality */
 
-func (pmc *safePaxosMajorityChecker) InitNotifier(key uint) {
+func (pmc *safePaxosMajorityChecker) InitNotifier(key uint) chan bool {
 	pmc.Lock()
 	defer pmc.Unlock()
 
 	pmc.notifier[key] = make(chan bool)
+	return pmc.notifier[key]
 }
 
 func (pmc *safePaxosMajorityChecker) GetNotifier(key uint) chan bool {

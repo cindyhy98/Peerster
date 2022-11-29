@@ -6,32 +6,30 @@ import (
 	"sync"
 )
 
-type safePaxosInstance struct {
+type safePaxosCurrentState struct {
 	*sync.Mutex
-	maxID               uint
-	offsetID            uint
-	currentLogicalClock uint
-	maxIDProposedValue  *types.PaxosValue
-	acceptedID          uint
-	acceptedValue       *types.PaxosValue
-	promises            []*types.PaxosPromiseMessage // store the received promise
+	maxID         uint
+	offsetID      uint
+	acceptedID    uint
+	acceptedValue *types.PaxosValue
+	promises      []*types.PaxosPromiseMessage // store the received promise
 }
 
-func (pi *safePaxosInstance) UpdatePaxosOffsetID() {
+func (pi *safePaxosCurrentState) UpdatePaxosOffsetID() {
 	pi.Lock()
 	defer pi.Unlock()
 
 	pi.offsetID += 1
 }
 
-func (pi *safePaxosInstance) UpdatePaxosPromises(message *types.PaxosPromiseMessage) {
+func (pi *safePaxosCurrentState) UpdatePaxosPromises(message *types.PaxosPromiseMessage) {
 	pi.Lock()
 	defer pi.Unlock()
 
 	pi.promises = append(pi.promises, message)
 }
 
-func (pi *safePaxosInstance) FindAcceptedValueInPaxosPromises(proposedValue types.PaxosValue) types.PaxosValue {
+func (pi *safePaxosCurrentState) FindAcceptedValueInPaxosPromises(proposedValue types.PaxosValue) types.PaxosValue {
 	pi.Lock()
 	defer pi.Unlock()
 
@@ -59,7 +57,7 @@ func (pi *safePaxosInstance) FindAcceptedValueInPaxosPromises(proposedValue type
 	return *pi.promises[selectedIndex].AcceptedValue
 }
 
-func (pi *safePaxosInstance) UpdatePaxosAcceptedIDAndAcceptedValue(message *types.PaxosProposeMessage) {
+func (pi *safePaxosCurrentState) UpdatePaxosAcceptedIDAndAcceptedValue(message *types.PaxosProposeMessage) {
 	pi.Lock()
 	defer pi.Unlock()
 

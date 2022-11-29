@@ -61,14 +61,19 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newSearchReplyChecker.Mutex = &sync.Mutex{}
 	newSearchReplyChecker.realSearchReplyChecker = make(map[string]chan []types.FileInfo)
 
-	var newPaxosInstance safePaxosInstance
-	newPaxosInstance.Mutex = &sync.Mutex{}
-	newPaxosInstance.maxID = 0
-	newPaxosInstance.offsetID = 0
-	newPaxosInstance.currentLogicalClock = 0
-	newPaxosInstance.promises = make([]*types.PaxosPromiseMessage, 0)
-	newPaxosInstance.acceptedID = 0
-	newPaxosInstance.acceptedValue = nil
+	var newPaxosCurrentState safePaxosCurrentState
+	newPaxosCurrentState.Mutex = &sync.Mutex{}
+	newPaxosCurrentState.maxID = 0
+	newPaxosCurrentState.offsetID = 0
+	newPaxosCurrentState.promises = make([]*types.PaxosPromiseMessage, 0)
+	newPaxosCurrentState.acceptedID = 0
+	newPaxosCurrentState.acceptedValue = nil
+
+	var newTlcCurrentState safeTlcCurrentState
+	newTlcCurrentState.Mutex = &sync.Mutex{}
+	newTlcCurrentState.currentLogicalClock = 0
+	newTlcCurrentState.hasBroadcast = false
+	newTlcCurrentState.futureTLCMessage = make(map[uint]types.TLCMessage, 0)
 
 	var newPaxosPromiseMajority safePaxosMajorityChecker
 	newPaxosPromiseMajority.Mutex = &sync.Mutex{}
@@ -79,6 +84,11 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	newPaxosAcceptMajority.Mutex = &sync.Mutex{}
 	newPaxosAcceptMajority.counter = make(map[uint]map[string]int)
 	newPaxosAcceptMajority.notifier = make(map[uint]chan bool)
+
+	var newTlcMajority safePaxosMajorityChecker
+	newTlcMajority.Mutex = &sync.Mutex{}
+	newTlcMajority.counter = make(map[uint]map[string]int)
+	newTlcMajority.notifier = make(map[uint]chan bool)
 
 	newNode := node{
 		conf:                 conf,
@@ -92,9 +102,11 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 		catalog:              newCatalog,
 		dataReply:            newDataReplyChecker,
 		searchReply:          newSearchReplyChecker,
-		paxosInstance:        newPaxosInstance,
+		paxosCurrentState:    newPaxosCurrentState,
+		tlcCurrentState:      newTlcCurrentState,
 		paxosPromiseMajority: newPaxosPromiseMajority,
-		paxosAcceptMajority:  newPaxosAcceptMajority}
+		paxosAcceptMajority:  newPaxosAcceptMajority,
+		tlcMajority:          newTlcMajority}
 
 	// Register the handler
 	/* HW0 */
@@ -118,6 +130,7 @@ func NewPeer(conf peer.Configuration) peer.Peer {
 	conf.MessageRegistry.RegisterMessageCallback(types.PaxosPromiseMessage{}, newNode.ExecPaxosPromiseMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.PaxosProposeMessage{}, newNode.ExecPaxosProposeMessage)
 	conf.MessageRegistry.RegisterMessageCallback(types.PaxosAcceptMessage{}, newNode.ExecPaxosAcceptMessage)
+	conf.MessageRegistry.RegisterMessageCallback(types.TLCMessage{}, newNode.ExecTLCMessage)
 
 	return &newNode
 }
@@ -148,10 +161,12 @@ type node struct {
 	dataReply   dataReplyChecker
 	searchReply searchReplyChecker
 
-	paxosInstance safePaxosInstance
+	paxosCurrentState safePaxosCurrentState
+	tlcCurrentState   safeTlcCurrentState
 
 	paxosPromiseMajority safePaxosMajorityChecker
 	paxosAcceptMajority  safePaxosMajorityChecker
+	tlcMajority          safePaxosMajorityChecker
 }
 
 func checkTimeoutError(err error, timeout time.Duration) error {

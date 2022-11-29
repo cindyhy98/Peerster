@@ -12,7 +12,7 @@ func (n *node) BroadcastPaxosPrepare(ID uint) {
 		log.Info().Msgf("[BroadcastPaxosPrepare] ID = %v", ID)
 		// Broadcast a PaxosPrepareMessage
 		newPaxosPrepareMessage := types.PaxosPrepareMessage{
-			Step:   uint(0),
+			Step:   n.tlcCurrentState.currentLogicalClock,
 			ID:     ID,
 			Source: n.conf.Socket.GetAddress(),
 		}
@@ -27,28 +27,27 @@ func (n *node) BroadcastPaxosPrepare(ID uint) {
 
 func (n *node) WaitForPaxosPromise(timeout time.Duration) bool {
 	notifier := false
-	notifierChannel := n.paxosPromiseMajority.GetNotifier(n.paxosInstance.currentLogicalClock)
-	defer n.paxosPromiseMajority.DeleteNotifier(n.paxosInstance.currentLogicalClock)
+	notifierChannel := n.paxosPromiseMajority.InitNotifier(n.tlcCurrentState.currentLogicalClock)
+	defer n.paxosPromiseMajority.DeleteNotifier(n.tlcCurrentState.currentLogicalClock)
 
-	for hasTimeout := false; !hasTimeout; {
-		select {
-		case notifier = <-notifierChannel:
-			// Reach a majority of PaxosPromises -> progress to phase two
-			log.Info().Msgf("[WaitForPaxosPromise] get a majority of promises")
+	select {
+	case notifier = <-notifierChannel:
+		// Reach a majority of PaxosPromises -> progress to phase two
+		log.Info().Msgf("[WaitForPaxosPromise] get a majority of promises")
+		break
+	case <-time.After(timeout):
+		log.Info().Msgf("[WaitForPaxosPromise] timeout reaches, need to retry from phase 1")
 
-		case <-time.After(timeout):
-			log.Info().Msgf("[WaitForPaxosPromise] timeout reaches")
-			hasTimeout = true
-		}
 	}
 
 	return notifier
+
 }
 
 func (n *node) EnterPhaseOne() bool {
 	reachPromiseMajority := false
 
-	Id := n.conf.PaxosID + n.paxosInstance.offsetID*n.conf.TotalPeers
+	Id := n.conf.PaxosID + n.paxosCurrentState.offsetID*n.conf.TotalPeers
 	n.BroadcastPaxosPrepare(Id)
 
 	// Wait for a majority of PaxosPromise
@@ -56,7 +55,7 @@ func (n *node) EnterPhaseOne() bool {
 
 	if !reachPromiseMajority {
 		// For Retry after timeout
-		n.paxosInstance.UpdatePaxosOffsetID()
+		n.paxosCurrentState.UpdatePaxosOffsetID()
 	}
 
 	return reachPromiseMajority
@@ -68,9 +67,9 @@ func (n *node) BroadcastPaxosPropose(proposedValue types.PaxosValue) {
 	go func() {
 		// Broadcast a PaxosProposeMessage
 		newPaxosProposeMessage := types.PaxosProposeMessage{
-			Step:  n.paxosInstance.currentLogicalClock,
-			ID:    n.paxosInstance.maxID,
-			Value: n.paxosInstance.FindAcceptedValueInPaxosPromises(proposedValue),
+			Step:  n.tlcCurrentState.currentLogicalClock,
+			ID:    n.paxosCurrentState.maxID,
+			Value: n.paxosCurrentState.FindAcceptedValueInPaxosPromises(proposedValue),
 		}
 
 		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosProposeMessage)
@@ -83,19 +82,17 @@ func (n *node) BroadcastPaxosPropose(proposedValue types.PaxosValue) {
 
 func (n *node) WaitForPaxosAccept(timeout time.Duration) bool {
 	notifier := false
-	notifierChannel := n.paxosAcceptMajority.GetNotifier(n.paxosInstance.currentLogicalClock)
-	defer n.paxosAcceptMajority.DeleteNotifier(n.paxosInstance.currentLogicalClock)
+	notifierChannel := n.paxosAcceptMajority.InitNotifier(n.tlcCurrentState.currentLogicalClock)
+	defer n.paxosAcceptMajority.DeleteNotifier(n.tlcCurrentState.currentLogicalClock)
 
-	for hasTimeout := false; !hasTimeout; {
-		select {
-		case notifier = <-notifierChannel:
-			// Reach a majority of PaxosPromises -> progress to phase two
-			log.Info().Msgf("[WaitForPaxosAccept] get a majority of accept")
+	select {
+	case notifier = <-notifierChannel:
+		// Reach a majority of PaxosPromises -> progress to phase two
+		log.Info().Msgf("[WaitForPaxosAccept] get a majority of accept")
+		break
+	case <-time.After(timeout):
+		log.Info().Msgf("[WaitForPaxosAccept] timeout reaches, need to retry from phase 1")
 
-		case <-time.After(timeout):
-			log.Info().Msgf("[WaitForPaxosAccept] timeout reaches")
-			hasTimeout = true
-		}
 	}
 
 	return notifier
@@ -110,11 +107,30 @@ func (n *node) EnterPhaseTwo(proposedValue types.PaxosValue) bool {
 
 	if !reachAcceptMajority {
 		// For Retry after timeout
-		n.paxosInstance.UpdatePaxosOffsetID()
+		n.paxosCurrentState.UpdatePaxosOffsetID()
 	}
 
 	return reachAcceptMajority
 
+}
+
+func (n *node) WaitForTLC() bool {
+	notifier := false
+	notifierChannel := n.tlcMajority.InitNotifier(n.tlcCurrentState.currentLogicalClock)
+	defer n.tlcMajority.DeleteNotifier(n.tlcCurrentState.currentLogicalClock)
+
+	log.Debug().Msgf("TLC %v", notifierChannel)
+	select {
+	case notifier = <-notifierChannel:
+		// Reach a majority of PaxosPromises -> progress to phase two
+		log.Info().Msgf("[WaitForTLC] get a majority of TLC")
+	}
+
+	return notifier
+}
+
+func (n *node) EnterPhaseTLC() bool {
+	return n.WaitForTLC()
 }
 
 func (n *node) RunPaxos(proposedValue types.PaxosValue) (types.PaxosValue, error) {
@@ -126,6 +142,7 @@ func (n *node) RunPaxos(proposedValue types.PaxosValue) (types.PaxosValue, error
 	// [Phase 1]
 	for !reachMajority {
 		reachMajority = n.EnterPhaseOne()
+		log.Info().Msgf("[RunPaxos] reachMajority in phase one = %v", reachMajority)
 
 		// [Phase 2]
 		if reachMajority {
@@ -136,7 +153,10 @@ func (n *node) RunPaxos(proposedValue types.PaxosValue) (types.PaxosValue, error
 		}
 	}
 
-	decidedValue = *n.paxosInstance.acceptedValue
+	// when the decided value == to the one you propose -> end the tag
+
+	//
+	decidedValue = *n.paxosCurrentState.acceptedValue
 	log.Info().Msgf("[RunPaxos] after running Paxos decidedValue = %v", decidedValue)
 
 	return decidedValue, nil

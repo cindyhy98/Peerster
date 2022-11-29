@@ -127,7 +127,7 @@ func (n *node) WaitForAck(pkt transport.Packet, msgRumor *types.RumorsMessage, n
 		go func() {
 			for {
 				<-timer.C
-				log.Error().Msgf("[WaitForAck] Timeout!!")
+				log.Error().Msgf("[WaitForAck] Timeout!! Send to another Neighbor")
 
 				var chosenNeighborNew string
 				if len(neighbor) > 1 {
@@ -235,18 +235,18 @@ func (n *node) ForwardSearchRequest(searchReq *types.SearchRequestMessage, neigh
 func (n *node) CheckPaxosPrepareMessage(msgPaxosPrepare *types.PaxosPrepareMessage) bool {
 	shouldIgnore := false
 	// Ignore messages whose Step field does not match your current logical clock
-	if msgPaxosPrepare.Step != n.paxosInstance.currentLogicalClock {
+	if msgPaxosPrepare.Step != n.tlcCurrentState.currentLogicalClock {
 		shouldIgnore = true
-		log.Info().Msgf("Ignore old paxos prepare message %v %v", n.paxosInstance.currentLogicalClock, msgPaxosPrepare.Step)
+		log.Info().Msgf("Ignore old paxos prepare message %v %v", n.tlcCurrentState.currentLogicalClock, msgPaxosPrepare.Step)
 
 	}
 
-	if msgPaxosPrepare.ID <= n.paxosInstance.maxID {
+	if msgPaxosPrepare.ID <= n.paxosCurrentState.maxID {
 		shouldIgnore = true
-		log.Info().Msgf("Ignore a prepare message as Paxos ID (%v) isn't greater than the maxID (%v)", msgPaxosPrepare.ID, n.paxosInstance.maxID)
+		log.Info().Msgf("Ignore a prepare message as Paxos ID (%v) isn't greater than the maxID (%v)", msgPaxosPrepare.ID, n.paxosCurrentState.maxID)
 	} else {
 		log.Info().Msgf("[CheckPaxosPrepareMessage] Update maxID to %v in prepare phase", msgPaxosPrepare.ID)
-		n.paxosInstance.maxID = msgPaxosPrepare.ID
+		n.paxosCurrentState.maxID = msgPaxosPrepare.ID
 	}
 
 	return shouldIgnore
@@ -256,16 +256,16 @@ func (n *node) CheckPaxosPromiseMessage(msgPaxosPromise *types.PaxosPromiseMessa
 	shouldIgnore := false
 
 	// Ignore messages whose Step field does not match your current logical clock
-	if msgPaxosPromise.Step != n.paxosInstance.currentLogicalClock {
+	if msgPaxosPromise.Step != n.tlcCurrentState.currentLogicalClock {
 		shouldIgnore = true
-		log.Info().Msgf("Ignore old paxos promise message %v %v", n.paxosInstance.currentLogicalClock, msgPaxosPromise.Step)
+		log.Info().Msgf("Ignore old paxos promise message %v %v", n.tlcCurrentState.currentLogicalClock, msgPaxosPromise.Step)
 
 	}
 
 	//// Ignore messages if the proposer is not in Paxos phase 1
-	//if n.paxosInstance.currentPhase != 1 {
+	//if n.paxosCurrentState.currentPhase != 1 {
 	//	shouldIgnore = true
-	//	log.Info().Msgf("Ignore a promise message as Paxos is in Phase [%v]", n.paxosInstance.currentPhase)
+	//	log.Info().Msgf("Ignore a promise message as Paxos is in Phase [%v]", n.paxosCurrentState.currentPhase)
 	//}
 
 	return shouldIgnore
@@ -274,15 +274,15 @@ func (n *node) CheckPaxosPromiseMessage(msgPaxosPromise *types.PaxosPromiseMessa
 func (n *node) CheckPaxosProposeMessage(msgPaxosPropose *types.PaxosProposeMessage) bool {
 	shouldIgnore := false
 	// Ignore messages whose Step field does not match your current logical clock
-	if msgPaxosPropose.Step != n.paxosInstance.currentLogicalClock {
+	if msgPaxosPropose.Step != n.tlcCurrentState.currentLogicalClock {
 		shouldIgnore = true
-		log.Info().Msgf("Ignore old paxos propose message %v %v", n.paxosInstance.currentLogicalClock, msgPaxosPropose.Step)
+		log.Info().Msgf("Ignore old paxos propose message %v %v", n.tlcCurrentState.currentLogicalClock, msgPaxosPropose.Step)
 
 	}
 
-	if msgPaxosPropose.ID != n.paxosInstance.maxID {
+	if msgPaxosPropose.ID != n.paxosCurrentState.maxID {
 		shouldIgnore = true
-		log.Info().Msgf("Ignore a propose message as Paxos ID (%v) isn't equal the maxID (%v)", msgPaxosPropose.ID, n.paxosInstance.maxID)
+		log.Info().Msgf("Ignore a propose message as Paxos ID (%v) isn't equal the maxID (%v)", msgPaxosPropose.ID, n.paxosCurrentState.maxID)
 	}
 
 	return shouldIgnore
@@ -292,17 +292,36 @@ func (n *node) CheckPaxosAcceptMessage(msgPaxosAccept *types.PaxosAcceptMessage)
 	shouldIgnore := false
 
 	// Ignore messages whose Step field does not match your current logical clock
-	if msgPaxosAccept.Step != n.paxosInstance.currentLogicalClock {
+	if msgPaxosAccept.Step != n.tlcCurrentState.currentLogicalClock {
 		shouldIgnore = true
-		log.Info().Msgf("Ignore old paxos accept message %v %v", n.paxosInstance.currentLogicalClock, msgPaxosAccept.Step)
+		log.Info().Msgf("Ignore old paxos accept message %v %v", n.tlcCurrentState.currentLogicalClock, msgPaxosAccept.Step)
 
 	}
 
 	//// Ignore messages if the proposer is not in Paxos phase 1
-	//if n.paxosInstance.currentPhase != 2 {
+	//if n.paxosCurrentState.currentPhase != 2 {
 	//	shouldIgnore = true
-	//	log.Info().Msgf("Ignore a accept message as Paxos is in Phase [%v]", n.paxosInstance.currentPhase)
+	//	log.Info().Msgf("Ignore a accept message as Paxos is in Phase [%v]", n.paxosCurrentState.currentPhase)
 	//}
+
+	return shouldIgnore
+}
+
+func (n *node) CheckTLCMessage(msgTLC *types.TLCMessage) bool {
+	shouldIgnore := false
+
+	// Ignore messages whose Step field is smaller than your current step
+	if msgTLC.Step < n.tlcCurrentState.currentLogicalClock {
+		shouldIgnore = true
+		log.Info().Msgf("Ignore old TLCmessage, currentStep = %v, thisStep = %v", n.tlcCurrentState.currentLogicalClock, msgTLC.Step)
+	}
+
+	// store the future step tlc message in tlcCurrentState
+	if msgTLC.Step > n.tlcCurrentState.currentLogicalClock {
+		shouldIgnore = true
+		n.tlcCurrentState.UpdateFutureTLCMessage(msgTLC.Step, *msgTLC)
+		log.Info().Msgf("Add future step TLCMessage (%v) into tlcCurrentState", msgTLC)
+	}
 
 	return shouldIgnore
 }
@@ -315,8 +334,8 @@ func (n *node) BroadcastPaxosPromise(msgPaxosPrepare *types.PaxosPrepareMessage)
 		newPaxosPromiseMessage := types.PaxosPromiseMessage{
 			Step:          msgPaxosPrepare.Step, // current TLC identifier
 			ID:            msgPaxosPrepare.ID,   // proposer ID
-			AcceptedID:    n.paxosInstance.acceptedID,
-			AcceptedValue: n.paxosInstance.acceptedValue,
+			AcceptedID:    n.paxosCurrentState.acceptedID,
+			AcceptedValue: n.paxosCurrentState.acceptedValue,
 		}
 
 		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosPromiseMessage)
@@ -331,7 +350,7 @@ func (n *node) BroadcastPaxosPromise(msgPaxosPrepare *types.PaxosPrepareMessage)
 		transMsgBroadcast, _ := n.conf.MessageRegistry.MarshalMessage(newPrivateMessage)
 		log.Info().Msgf("[%v] Private (Paxos Promise) => everyone", n.conf.Socket.GetAddress())
 
-		n.paxosPromiseMajority.InitNotifier(msgPaxosPrepare.Step)
+		//n.paxosPromiseMajority.InitNotifier(msgPaxosPrepare.Step)
 		_ = n.Broadcast(transMsgBroadcast)
 
 	}()
@@ -350,7 +369,43 @@ func (n *node) BroadcastPaxosAccept(msgPaxosPropose *types.PaxosProposeMessage) 
 		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newPaxosAcceptMessage)
 		log.Info().Msgf("[%v] Paxos Accept => everyone", n.conf.Socket.GetAddress())
 
-		n.paxosAcceptMajority.InitNotifier(msgPaxosPropose.Step)
+		//n.paxosAcceptMajority.InitNotifier(msgPaxosPropose.Step)
+		_ = n.Broadcast(transMsg)
+	}()
+
+}
+
+func (n *node) BroadcastFirstTLC(msgPaxosAccept *types.PaxosAcceptMessage) {
+
+	go func() {
+		log.Info().Msgf("[BroadcastFirstTLC] this tlc step = %v", n.tlcCurrentState.currentLogicalClock)
+		newTLCMessage := types.TLCMessage{
+			Step:  n.tlcCurrentState.currentLogicalClock,
+			Block: n.BuildBlock(n.tlcCurrentState.currentLogicalClock, nil, msgPaxosAccept.Value),
+		}
+
+		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newTLCMessage)
+		log.Info().Msgf("[BroadcastFirstTLC] [%v] TLC => everyone", n.conf.Socket.GetAddress())
+
+		n.tlcCurrentState.UpdateHasBroadcast()
+		_ = n.Broadcast(transMsg)
+	}()
+
+}
+
+func (n *node) BroadcastTLC(msgTLC *types.TLCMessage) {
+	// should it be a go routine?
+	go func() {
+		log.Info().Msgf("[BroadcastTLC] this tlc step = %v", msgTLC.Step)
+		newTLCMessage := types.TLCMessage{
+			Step:  msgTLC.Step,
+			Block: n.BuildBlock(msgTLC.Step, msgTLC.Block.PrevHash, msgTLC.Block.Value),
+		}
+
+		transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newTLCMessage)
+		log.Info().Msgf("[BroadcastTLC] [%v] TLC => everyone", n.conf.Socket.GetAddress())
+
+		n.tlcCurrentState.UpdateHasBroadcast()
 		_ = n.Broadcast(transMsg)
 	}()
 
@@ -756,14 +811,12 @@ func (n *node) ExecPaxosPromiseMessage(msg types.Message, pkt transport.Packet) 
 
 	go func() {
 		// Collect PaxosPromiseMessage Until a threshold
-		n.paxosPromiseMajority.UpdateCounter(msgPaxosPromise.Step, "")
-		n.paxosInstance.UpdatePaxosPromises(msgPaxosPromise)
-		if n.paxosPromiseMajority.GetCounter(msgPaxosPromise.Step, "") >=
-			n.conf.PaxosThreshold(n.conf.TotalPeers) {
-
+		n.paxosCurrentState.UpdatePaxosPromises(msgPaxosPromise)
+		if n.paxosPromiseMajority.UpdateAndGetCounter(msgPaxosPromise.Step, "") >= n.conf.PaxosThreshold(n.conf.TotalPeers) {
+			log.Info().Msgf("[ExecPaxosPromiseMessage] send notify")
 			// Send a notification to unblock
 			n.paxosPromiseMajority.UpdateNotifier(msgPaxosPromise.Step, true)
-			return
+
 		}
 	}()
 
@@ -783,8 +836,8 @@ func (n *node) ExecPaxosProposeMessage(msg types.Message, pkt transport.Packet) 
 	}
 
 	// this PaxosPropose is the one with maxID -> store its value
-	// Store the AcceptedID and AcceptedValue in paxosInstance (It's yours accepted value)
-	n.paxosInstance.UpdatePaxosAcceptedIDAndAcceptedValue(msgPaxosPropose)
+	// Store the AcceptedID and AcceptedValue in paxosCurrentState (It's yours accepted value)
+	n.paxosCurrentState.UpdatePaxosAcceptedIDAndAcceptedValue(msgPaxosPropose)
 
 	n.BroadcastPaxosAccept(msgPaxosPropose)
 	return nil
@@ -803,23 +856,82 @@ func (n *node) ExecPaxosAcceptMessage(msg types.Message, pkt transport.Packet) e
 		return nil
 	}
 
-	//if n.conf.Socket.GetAddress() == pkt.Header.Source {
-	//	return nil
-	//}
+	log.Info().Msgf("[ExecPaxosAcceptMessage] paxosThreshold = %v", n.conf.PaxosThreshold(n.conf.TotalPeers))
 	go func() {
-		n.paxosAcceptMajority.UpdateCounter(msgPaxosAccept.Step, msgPaxosAccept.Value.UniqID)
-		//n.paxosInstance.UpdatePaxosPromises(msgPaxosPromise)
-		log.Info().Msgf("[ExecPaxosAcceptMessage] paxosThreshold = %v", n.conf.PaxosThreshold(n.conf.TotalPeers))
-		if n.paxosAcceptMajority.GetCounter(msgPaxosAccept.Step, msgPaxosAccept.Value.UniqID) >=
+		if n.paxosAcceptMajority.UpdateAndGetCounter(msgPaxosAccept.Step, msgPaxosAccept.Value.UniqID) >=
 			n.conf.PaxosThreshold(n.conf.TotalPeers) {
 
-			log.Info().Msgf("[ExecPaxosAcceptMessage] [%v] paxosInstance AcceptedID %v, AcceptedValue %v",
-				n.conf.Socket.GetAddress(), n.paxosInstance.acceptedID, n.paxosInstance.acceptedValue)
+			log.Info().Msgf("[ExecPaxosAcceptMessage] [%v] paxosCurrentState AcceptedID %v, AcceptedValue %v",
+				n.conf.Socket.GetAddress(), n.paxosCurrentState.acceptedID, n.paxosCurrentState.acceptedValue)
 			// Send a notification to unblock
 			n.paxosAcceptMajority.UpdateNotifier(msgPaxosAccept.Step, true)
-			return
+
+			n.BroadcastFirstTLC(msgPaxosAccept)
+
 		}
 	}()
+
+	return nil
+}
+
+func (n *node) ExecTLCMessage(msg types.Message, pkt transport.Packet) error {
+	msgTLC, ok := msg.(*types.TLCMessage)
+	if !ok {
+		return xerrors.Errorf("wrong type: %T", msg)
+	}
+
+	log.Info().Msgf("[%v] <= TLC (%v) [%v]", n.conf.Socket.GetAddress(), msgTLC, pkt.Header.Source)
+
+	if n.CheckTLCMessage(msgTLC) {
+		// Ignore
+		return nil
+	}
+
+	if n.tlcMajority.UpdateAndGetCounter(msgTLC.Step, msgTLC.Block.Value.UniqID) >=
+		n.conf.PaxosThreshold(n.conf.TotalPeers) {
+		isCatchUp := false
+		thisTlcMessage := msgTLC
+		for {
+
+			log.Info().Msgf("[ExecTLCMessage] collect enough TLCMessage for step %v", thisTlcMessage.Step)
+
+			// Step 1: Add the block to its own blockchain
+			err := n.AddBlock(thisTlcMessage.Block)
+			if err != nil {
+				log.Error().Msgf("[ExecTLCMessage] err %v", err)
+			}
+
+			// Step 2: Set the name/metahash association in the name store
+			n.conf.Storage.GetNamingStore().Set(thisTlcMessage.Block.Value.Filename, []byte(thisTlcMessage.Block.Value.Metahash))
+
+			// Step 3: In case the peer hasn’t broadcasted a TLCMessage before: broadcast the TLCMessage
+			if !n.tlcCurrentState.hasBroadcast && !isCatchUp {
+				log.Info().Msgf("[ExecTLCMessage] currentStep = %v", n.tlcCurrentState.currentLogicalClock)
+				n.tlcCurrentState.UpdateHasBroadcast()
+				n.BroadcastTLC(thisTlcMessage)
+			}
+
+			// Step 4: Increase by 1 its internal TLC step
+			n.tlcCurrentState.IncrementStep()
+			// TODO: catch up
+			isCatchUp = true
+			// Check the message of this incrementedStep that store in tlcCurrentState.futureTLCMessage
+
+			// Step 5: catch up
+			if isCatchUp {
+				futureTLC, okTLC := n.tlcCurrentState.GetFutureTLCMessage(n.tlcCurrentState.currentLogicalClock)
+				if !okTLC {
+					// nothing to catch up for this step
+					log.Info().Msgf("Nothing to catch up for step %v", n.tlcCurrentState.currentLogicalClock)
+					break
+				} else {
+					// catch up
+					thisTlcMessage = &futureTLC
+				}
+			}
+		}
+
+	}
 
 	return nil
 }
