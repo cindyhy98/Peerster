@@ -454,17 +454,6 @@ func (n *node) Broadcast(msg transport.Message) error {
 
 	newMsgRumor.Rumors = append(newMsgRumor.Rumors, rumor)
 
-	neighbors := n.routingtable.FindNeighbor(socketAddr)
-
-	if len(neighbors) != 0 {
-		chosenNeighbor := neighbors[rand.Int()%(len(neighbors))]
-
-		_ = n.SendRumorToRandom(chosenNeighbor, &newMsgRumor)
-
-		//n.WaitForAck(pkt, &newMsgRumor, neighbors, chosenNeighbor)
-
-	}
-
 	// Transform RumorMessages to Messages
 	// Process Message locally
 	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newMsgRumor)
