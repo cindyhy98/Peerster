@@ -71,7 +71,7 @@ func (n *node) SendStatusToRandom(pkt transport.Packet) error {
 
 }
 
-func (n *node) SendRumorToRandom(pkt transport.Packet, chosenNeighbor string, msgRumor *types.RumorsMessage) error {
+func (n *node) SendRumorToRandom(chosenNeighbor string, msgRumor *types.RumorsMessage) error {
 	socketAddr := n.conf.Socket.GetAddress()
 	transMsg, errMsg := n.conf.MessageRegistry.MarshalMessage(msgRumor)
 	if errMsg != nil {
@@ -138,7 +138,7 @@ func (n *node) WaitForAck(pkt transport.Packet, msgRumor *types.RumorsMessage, n
 						}
 					}
 					log.Info().Msgf("[WaitForAck] Haven Received ack after Timeout, send to another neighbor %v", chosenNeighborNew)
-					_ = n.SendRumorToRandom(pkt, chosenNeighborNew, msgRumor)
+					_ = n.SendRumorToRandom(chosenNeighborNew, msgRumor)
 				}
 			}
 
@@ -501,7 +501,7 @@ func (n *node) ExecRumorsMessage(msg types.Message, pkt transport.Packet) error 
 		if len(neighbor) != 0 {
 			chosenNeighbor := neighbor[rand.Int()%(len(neighbor))]
 
-			_ = n.SendRumorToRandom(pkt, chosenNeighbor, msgRumor)
+			_ = n.SendRumorToRandom(chosenNeighbor, msgRumor)
 
 			n.WaitForAck(pkt, msgRumor, neighbor, chosenNeighbor)
 

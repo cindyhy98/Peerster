@@ -452,13 +452,23 @@ func (n *node) Broadcast(msg transport.Message) error {
 		Msg:      &msg,
 	}
 
-	//n.lastStatus.UpdateStatus(socketAddr, lastSeq+1)
-
 	newMsgRumor.Rumors = append(newMsgRumor.Rumors, rumor)
-	header := transport.NewHeader(socketAddr, socketAddr, socketAddr, 0)
+
+	neighbors := n.routingtable.FindNeighbor(socketAddr)
+
+	if len(neighbors) != 0 {
+		chosenNeighbor := neighbors[rand.Int()%(len(neighbors))]
+
+		_ = n.SendRumorToRandom(chosenNeighbor, &newMsgRumor)
+
+		//n.WaitForAck(pkt, &newMsgRumor, neighbors, chosenNeighbor)
+
+	}
 
 	// Transform RumorMessages to Messages
+	// Process Message locally
 	transMsg, _ := n.conf.MessageRegistry.MarshalMessage(newMsgRumor)
+	header := transport.NewHeader(socketAddr, socketAddr, socketAddr, 0)
 	pktRumor := transport.Packet{Header: &header, Msg: &transMsg}
 
 	errProcess := n.conf.MessageRegistry.ProcessPacket(pktRumor)
