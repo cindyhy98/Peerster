@@ -47,7 +47,7 @@ func (pmc *SafePaxosMajorityChecker) UpdateAndGetCounter(key uint, UniqueID stri
 
 func (pmc *SafePaxosMajorityChecker) CheckIfNotifierExist(key uint) bool {
 	pmc.Lock()
-	defer pmc.Unlock()
+	pmc.Unlock()
 
 	_, ok := pmc.notifier[key]
 

@@ -406,49 +406,6 @@ func (n *node) BroadcastTLC(msgTLC *types.TLCMessage) {
 
 }
 
-func (n *node) SpreadTlcMessage(msgTLC *types.TLCMessage) {
-	isCatchUp := false
-	thisTlcMessage := msgTLC
-	for {
-
-		log.Info().Msgf("[ExecTLCMessage] collect enough TLCMessage for step %v", thisTlcMessage.Step)
-
-		// Step 1: Add the block to its own blockchain
-		err := n.AddBlock(thisTlcMessage.Block)
-		if err != nil {
-			log.Error().Msgf("[ExecTLCMessage] err %v", err)
-		}
-
-		// Step 2: Set the name/metahash association in the name store
-		n.conf.Storage.GetNamingStore().Set(thisTlcMessage.Block.Value.Filename, []byte(thisTlcMessage.Block.Value.Metahash))
-
-		// Step 3: In case the peer hasn’t broadcasted a TLCMessage before: broadcast the TLCMessage
-		if !n.tlcCurrentState.hasBroadcast && !isCatchUp {
-			log.Info().Msgf("[ExecTLCMessage] currentStep = %v", n.tlcCurrentState.currentLogicalClock)
-			n.tlcCurrentState.UpdateHasBroadcast()
-			n.BroadcastTLC(thisTlcMessage)
-		}
-
-		// Step 4: Increase by 1 its internal TLC step
-		n.tlcCurrentState.IncrementStep()
-		isCatchUp = true
-		// Check the message of this incrementedStep that store in tlcCurrentState.futureTLCMessage
-
-		// Step 5: catch up
-		if isCatchUp {
-			futureTLC, okTLC := n.tlcCurrentState.GetFutureTLCMessage(n.tlcCurrentState.currentLogicalClock)
-			if !okTLC {
-				// nothing to catch up for this step
-				log.Info().Msgf("Nothing to catch up for step %v", n.tlcCurrentState.currentLogicalClock)
-				break
-			} else {
-				// catch up
-				thisTlcMessage = &futureTLC
-			}
-		}
-	}
-}
-
 /* Exec Message Handler */
 
 func (n *node) ExecRumorsMessage(msg types.Message, pkt transport.Packet) error {
@@ -930,7 +887,47 @@ func (n *node) ExecTLCMessage(msg types.Message, pkt transport.Packet) error {
 
 	if n.tlcMajority.UpdateAndGetCounter(msgTLC.Step, msgTLC.Block.Value.UniqID) >=
 		n.conf.PaxosThreshold(n.conf.TotalPeers) {
-		n.SpreadTlcMessage(msgTLC)
+		isCatchUp := false
+		thisTlcMessage := msgTLC
+		for {
+
+			log.Info().Msgf("[ExecTLCMessage] collect enough TLCMessage for step %v", thisTlcMessage.Step)
+
+			// Step 1: Add the block to its own blockchain
+			err := n.AddBlock(thisTlcMessage.Block)
+			if err != nil {
+				log.Error().Msgf("[ExecTLCMessage] err %v", err)
+			}
+
+			// Step 2: Set the name/metahash association in the name store
+			n.conf.Storage.GetNamingStore().Set(thisTlcMessage.Block.Value.Filename, []byte(thisTlcMessage.Block.Value.Metahash))
+
+			// Step 3: In case the peer hasn’t broadcasted a TLCMessage before: broadcast the TLCMessage
+			if !n.tlcCurrentState.hasBroadcast && !isCatchUp {
+				log.Info().Msgf("[ExecTLCMessage] currentStep = %v", n.tlcCurrentState.currentLogicalClock)
+				n.tlcCurrentState.UpdateHasBroadcast()
+				n.BroadcastTLC(thisTlcMessage)
+			}
+
+			// Step 4: Increase by 1 its internal TLC step
+			n.tlcCurrentState.IncrementStep()
+			isCatchUp = true
+			// Check the message of this incrementedStep that store in tlcCurrentState.futureTLCMessage
+
+			// Step 5: catch up
+			if isCatchUp {
+				futureTLC, okTLC := n.tlcCurrentState.GetFutureTLCMessage(n.tlcCurrentState.currentLogicalClock)
+				if !okTLC {
+					// nothing to catch up for this step
+					log.Info().Msgf("Nothing to catch up for step %v", n.tlcCurrentState.currentLogicalClock)
+					break
+				} else {
+					// catch up
+					thisTlcMessage = &futureTLC
+				}
+			}
+		}
+
 	}
 
 	return nil
